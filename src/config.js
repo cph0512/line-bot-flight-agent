@@ -18,6 +18,10 @@ const config = {
     CI: { id: process.env.CI_MEMBER_ID, password: process.env.CI_MEMBER_PASSWORD },
     BR: { id: process.env.BR_MEMBER_ID, password: process.env.BR_MEMBER_PASSWORD },
     JX: { id: process.env.JX_MEMBER_ID, password: process.env.JX_MEMBER_PASSWORD },
+    EK: { id: process.env.EK_MEMBER_ID, password: process.env.EK_MEMBER_PASSWORD },
+    TK: { id: process.env.TK_MEMBER_ID, password: process.env.TK_MEMBER_PASSWORD },
+    CX: { id: process.env.CX_MEMBER_ID, password: process.env.CX_MEMBER_PASSWORD },
+    SQ: { id: process.env.SQ_MEMBER_ID, password: process.env.SQ_MEMBER_PASSWORD },
   },
   server: {
     port: process.env.PORT || 3000,

@@ -1,6 +1,6 @@
 const { lineClient } = require("./lineClient");
 const { handleMessage, clearHistory } = require("../ai/claudeAgent");
-const { createWelcomeMessage } = require("./flexMessages");
+const { createWelcomeMessage, createFlightComparisonFlex } = require("./flexMessages");
 const logger = require("../utils/logger");
 
 async function handleWebhookEvents(events) {
@@ -51,8 +51,25 @@ async function handleSingleEvent(event) {
   // AI + RPA 處理
   const aiResponse = await handleMessage(userId, text);
 
-  // 分段回覆
-  const messages = splitMessage(aiResponse).map((t) => ({ type: "text", text: t }));
+  // 組合回覆訊息（LINE 每次最多 5 則）
+  const messages = [];
+
+  // 如果有航班資料，先送 Flex 比價卡片
+  if (aiResponse.flights && aiResponse.flights.length > 0) {
+    const flexMsg = createFlightComparisonFlex(aiResponse.flights);
+    if (flexMsg) {
+      messages.push(flexMsg);
+    }
+  }
+
+  // 再送 AI 文字分析（Flex 佔 1 則，文字最多 4 則；無 Flex 則文字最多 5 則）
+  const maxTextMessages = messages.length > 0 ? 4 : 5;
+  const responseText = typeof aiResponse === "string" ? aiResponse : (aiResponse.text || "查詢完成");
+  const textParts = splitMessage(responseText);
+  textParts.slice(0, maxTextMessages).forEach((t) => {
+    messages.push({ type: "text", text: t });
+  });
+
   await lineClient.replyMessage({ replyToken: event.replyToken, messages });
 }
 

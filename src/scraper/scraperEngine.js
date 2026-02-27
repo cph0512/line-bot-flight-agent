@@ -17,12 +17,20 @@ const { config } = require("../config");
 const chinaAirlines = require("./airlines/chinaAirlines");
 const evaAir = require("./airlines/evaAir");
 const starlux = require("./airlines/starlux");
+const emirates = require("./airlines/emirates");
+const turkishAirlines = require("./airlines/turkishAirlines");
+const cathayPacific = require("./airlines/cathayPacific");
+const singaporeAirlines = require("./airlines/singaporeAirlines");
 
 // 註冊所有可用的航空公司爬蟲
 const SCRAPERS = {
   CI: chinaAirlines,
   BR: evaAir,
   JX: starlux,
+  EK: emirates,
+  TK: turkishAirlines,
+  CX: cathayPacific,
+  SQ: singaporeAirlines,
 };
 
 // 限制同時執行的爬蟲數量（避免記憶體爆掉）

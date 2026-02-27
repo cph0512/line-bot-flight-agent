@@ -4,8 +4,14 @@
 // 目標網站：https://www.china-airlines.com/
 // 功能：查詢現金票價 + 里程兌換票價
 //
+// 搜尋流程：
+// 1. china-airlines.com 填寫表單
+// 2. 跳轉 bookingportal.china-airlines.com（可能出現警告）
+// 3. 跳轉 des-portal.china-airlines.com 顯示結果
+//
 // ⚠️ 重要：航空公司網站經常改版，
 // selector 可能需要定期更新！
+// 最後更新：2026-02-27
 // =============================================
 
 const { createPage, closePage, humanDelay, waitAndRetry, takeScreenshot } = require("../browserManager");
@@ -29,7 +35,6 @@ const AIRLINE = {
  * @param {string} params.departDate    - "2025-03-15"
  * @param {string} params.returnDate    - "2025-03-20" (optional)
  * @param {number} params.adults        - 1
- * @param {string} params.cabinClass    - "ECONOMY"
  * @returns {Object} { success, flights, error }
  */
 async function searchCash(params) {
@@ -42,74 +47,53 @@ async function searchCash(params) {
 
     // === 步驟 1：前往華航訂票頁面 ===
     await page.goto(AIRLINE.bookingUrl, { waitUntil: "domcontentloaded" });
-    await humanDelay(page);
+    await humanDelay(page, 2000, 3000);
 
-    // 關閉可能出現的 cookie 提示或彈窗
-    try {
-      const cookieBtn = page.locator('button:has-text("接受"), button:has-text("同意"), .cookie-accept');
-      if (await cookieBtn.isVisible({ timeout: 3000 })) {
-        await cookieBtn.click();
-        await humanDelay(page);
-      }
-    } catch {}
+    // 關閉 cookie 提示
+    await dismissCookieBanner(page);
 
     // === 步驟 2：填寫搜尋表單 ===
 
     // 選擇來回 / 單程
     if (returnDate) {
-      // 預設通常就是來回
-      const roundTrip = page.locator('[data-value="roundTrip"], #roundTrip, input[value="RT"]');
-      if (await roundTrip.isVisible({ timeout: 3000 })) {
-        await roundTrip.click();
-      }
+      await page.locator("#Round-trip").click().catch(() => {});
     } else {
-      const oneWay = page.locator('[data-value="oneWay"], #oneWay, input[value="OW"]');
-      if (await oneWay.isVisible({ timeout: 3000 })) {
-        await oneWay.click();
-      }
+      await page.locator("#One-way").click().catch(() => {});
     }
     await humanDelay(page, 300, 800);
 
     // 填入出發地
-    const originInput = page.locator(
-      '#departureCity, input[name="origin"], input[placeholder*="出發"], input[aria-label*="出發"]'
-    );
+    const originInput = page.locator("#From-booking");
     await originInput.click();
     await humanDelay(page, 200, 500);
     await originInput.fill("");
     await originInput.type(origin, { delay: 100 });
     await humanDelay(page, 1000, 2000);
     // 從下拉選單選擇
-    const originOption = page.locator(
-      `.suggestion-item:has-text("${origin}"), .dropdown-item:has-text("${origin}"), li:has-text("${origin}")`
-    ).first();
-    if (await originOption.isVisible({ timeout: 5000 })) {
-      await originOption.click();
+    const originSuggestion = page.locator(`#From-booking-suggestions li`).first();
+    if (await originSuggestion.isVisible({ timeout: 5000 })) {
+      await originSuggestion.click();
     } else {
       await page.keyboard.press("Enter");
     }
     await humanDelay(page);
 
     // 填入目的地
-    const destInput = page.locator(
-      '#arrivalCity, input[name="destination"], input[placeholder*="目的"], input[aria-label*="目的"]'
-    );
+    const destInput = page.locator("#To-booking");
     await destInput.click();
     await humanDelay(page, 200, 500);
     await destInput.fill("");
     await destInput.type(destination, { delay: 100 });
     await humanDelay(page, 1000, 2000);
-    const destOption = page.locator(
-      `.suggestion-item:has-text("${destination}"), .dropdown-item:has-text("${destination}"), li:has-text("${destination}")`
-    ).first();
-    if (await destOption.isVisible({ timeout: 5000 })) {
-      await destOption.click();
+    const destSuggestion = page.locator(`#To-booking-suggestions li`).first();
+    if (await destSuggestion.isVisible({ timeout: 5000 })) {
+      await destSuggestion.click();
     } else {
       await page.keyboard.press("Enter");
     }
     await humanDelay(page);
 
-    // 填入日期（這部分最複雜，各網站日期選擇器不同）
+    // 填入日期
     await fillDate(page, departDate, "depart");
     if (returnDate) {
       await fillDate(page, returnDate, "return");
@@ -121,19 +105,21 @@ async function searchCash(params) {
     }
 
     // === 步驟 3：送出搜尋 ===
-    const searchBtn = page.locator(
-      'button:has-text("搜尋"), button:has-text("查詢"), button[type="submit"].search-btn, .btn-search'
-    );
+    const searchBtn = page.locator('a[type="submit"].btn-brand-pink');
     await searchBtn.click();
+    logger.info("[華航] 已點擊搜尋，等待結果頁...");
 
-    // === 步驟 4：等待結果載入 ===
-    logger.info("[華航] 等待搜尋結果...");
+    // === 步驟 4：處理跳轉與警告頁面 ===
+    // 可能出現 bookingportal 的警告頁面（出發日期太近等）
+    await handleWarningPage(page);
 
-    // 等待結果或錯誤訊息出現
-    const resultLoaded = await Promise.race([
-      waitAndRetry(page, '.flight-result, .flight-card, .flight-list, [class*="flightResult"]', { timeout: 30000 }),
-      waitAndRetry(page, '.no-result, .error-message, [class*="noFlight"]', { timeout: 30000 }),
-    ]);
+    // 等待結果頁載入（des-portal.china-airlines.com）
+    await page.waitForSelector(".basic-flight-card-layout-top-section-container", {
+      timeout: 45000,
+    });
+    await humanDelay(page, 1000, 2000);
+
+    logger.info("[華航] 結果頁已載入");
 
     // 截圖（除錯用）
     if (config.server.nodeEnv === "development") {
@@ -202,14 +188,13 @@ async function searchMiles(params) {
     await page.waitForTimeout(3000);
 
     // 步驟 2：前往里程兌換頁面
-    // 華航的里程兌換頁面 URL（需要根據實際情況調整）
     await page.goto(
       "https://www.china-airlines.com/tw/zh/booking/book-flights/flight-search?type=award",
       { waitUntil: "domcontentloaded" }
     );
     await humanDelay(page);
 
-    // 步驟 3：填寫搜尋表單（類似現金票，但在里程模式下）
+    // 步驟 3：填寫搜尋表單（類似現金票）
     // ... (與 searchCash 類似的表單填寫邏輯)
 
     // 步驟 4：解析里程票結果
@@ -231,74 +216,98 @@ async function searchMiles(params) {
 // === 內部輔助函式 ===
 
 /**
- * 填入日期（處理各種日期選擇器）
- * 這是最棘手的部分，因為每個網站的日期選擇器都不一樣
+ * 關閉 cookie 提示
+ */
+async function dismissCookieBanner(page) {
+  try {
+    const cookieBtn = page.locator('a:has-text("我同意"), button:has-text("我同意"), button:has-text("接受")');
+    if (await cookieBtn.isVisible({ timeout: 3000 })) {
+      await cookieBtn.click();
+      await humanDelay(page, 300, 600);
+    }
+  } catch {}
+}
+
+/**
+ * 處理 bookingportal 的警告頁面（出發日期太近等）
+ */
+async function handleWarningPage(page) {
+  try {
+    // 等待跳轉到 bookingportal 或 des-portal
+    await page.waitForURL(/bookingportal|des-portal/, { timeout: 15000 });
+    await humanDelay(page, 1000, 2000);
+
+    // 如果出現警告對話框，點「繼續」
+    const continueBtn = page.locator('button:has-text("繼續"), a:has-text("繼續")');
+    if (await continueBtn.isVisible({ timeout: 5000 })) {
+      logger.info("[華航] 偵測到警告頁面，點擊繼續");
+      await continueBtn.click();
+      await humanDelay(page, 2000, 3000);
+    }
+  } catch {
+    // 沒有警告頁面，直接跳到結果頁
+  }
+}
+
+/**
+ * 填入日期
+ * 華航日期欄位 ID: #departureDate（格式 YYYY/MM/DD）
  */
 async function fillDate(page, dateStr, type) {
   const [year, month, day] = dateStr.split("-");
+  const formattedDate = `${year}/${month}/${day}`;
 
-  // 嘗試直接填入 input
-  const dateInput = page.locator(
-    type === "depart"
-      ? '#departureDate, input[name="departureDate"], input[aria-label*="出發日期"]'
-      : '#returnDate, input[name="returnDate"], input[aria-label*="回程日期"]'
-  );
-
-  try {
-    await dateInput.click();
-    await humanDelay(page, 500, 1000);
-
-    // 嘗試在日曆上點擊正確的日期
-    // 先導航到正確的月份
-    const targetMonth = parseInt(month);
-    const targetYear = parseInt(year);
-
-    // 點「下個月」按鈕直到到達目標月份
-    for (let i = 0; i < 12; i++) {
-      const currentMonth = await page.locator(".calendar-month, .month-title, [class*='monthYear']").first().textContent().catch(() => "");
-      if (currentMonth.includes(`${targetYear}`) && currentMonth.includes(`${targetMonth}`)) {
-        break;
+  if (type === "depart") {
+    // 直接透過 JavaScript 設定日期值（最可靠的方式）
+    await page.evaluate((dateVal) => {
+      const input = document.querySelector("#departureDate");
+      if (input) {
+        // 用 Angular 的方式設定值
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, "value"
+        ).set;
+        nativeInputValueSetter.call(input, dateVal);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      const nextBtn = page.locator('.next-month, .calendar-next, button[aria-label="Next month"]').first();
-      if (await nextBtn.isVisible({ timeout: 1000 })) {
-        await nextBtn.click();
-        await humanDelay(page, 300, 600);
-      } else {
-        break;
+    }, formattedDate);
+  } else {
+    // 回程日期
+    await page.evaluate((dateVal) => {
+      const input = document.querySelector("#returnDate");
+      if (input) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, "value"
+        ).set;
+        nativeInputValueSetter.call(input, dateVal);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
       }
-    }
-
-    // 點擊日期
-    const dayNum = parseInt(day);
-    const dayCell = page.locator(
-      `td[data-day="${dayNum}"], .day-cell:has-text("${dayNum}"), button:has-text("${dayNum}")`
-    ).first();
-    if (await dayCell.isVisible({ timeout: 3000 })) {
-      await dayCell.click();
-    } else {
-      // fallback：直接輸入
-      await dateInput.fill(dateStr);
-    }
-  } catch {
-    // 最後手段：嘗試直接填入
-    try {
-      await dateInput.fill(`${year}/${month}/${day}`);
-    } catch {
-      logger.warn(`[華航] 日期填入失敗: ${dateStr}`);
-    }
+    }, formattedDate);
   }
-  await humanDelay(page, 300, 800);
+
+  await humanDelay(page, 300, 600);
+  logger.info(`[華航] 日期已設定: ${type} = ${formattedDate}`);
 }
 
+/**
+ * 設定旅客人數
+ */
 async function setPassengerCount(page, adults) {
   try {
-    const adultPlus = page.locator(
-      '.passenger-adult .plus, button[aria-label*="增加成人"], .pax-adult .btn-plus'
-    ).first();
-    for (let i = 1; i < adults; i++) {
-      if (await adultPlus.isVisible({ timeout: 3000 })) {
-        await adultPlus.click();
-        await humanDelay(page, 200, 400);
+    // 點開旅客下拉選單
+    const passengerDropdown = page.locator("#No-of-passengers, [class*='passenger'] .dropdown-toggle");
+    if (await passengerDropdown.isVisible({ timeout: 3000 })) {
+      await passengerDropdown.click();
+      await humanDelay(page, 300, 600);
+
+      // 點擊 + 按鈕增加成人人數
+      const adultPlus = page.locator('.adult-count .plus, button[aria-label*="增加成人"]').first();
+      for (let i = 1; i < adults; i++) {
+        if (await adultPlus.isVisible({ timeout: 2000 })) {
+          await adultPlus.click();
+          await humanDelay(page, 200, 400);
+        }
       }
     }
   } catch {
@@ -308,50 +317,91 @@ async function setPassengerCount(page, adults) {
 
 /**
  * 解析航班搜尋結果頁面
- * ⚠️ 這裡的 selector 需要根據實際網站調整
+ * 結果頁在 des-portal.china-airlines.com
+ *
+ * DOM 結構：
+ * .basic-flight-card-layout-top-section-container  ← 每個航班卡片
+ *   .bound-departure-datetime  ← 出發時間
+ *   .bound-arrival-datetime    ← 抵達時間
+ *   .duration-value            ← 飛行時間
+ *   .flight-number             ← 航班編號
+ *   .bound-nb-stop-container   ← 轉機資訊（有 .has-stops class 表示有轉機）
+ *   button.flight-card-button-desktop-view  ← 票價按鈕
+ *     .refx-fare-family-flight-card-name    ← 艙等名稱
+ *     [data-amount]                         ← 價格數字
  */
 async function parseFlightResults(page) {
   const flights = [];
 
   try {
-    // 取得所有航班卡片
-    const cards = page.locator(
-      '.flight-result, .flight-card, [class*="flightResult"], [class*="flight-item"]'
-    );
-    const count = await cards.count();
+    const flightData = await page.evaluate(() => {
+      const cards = document.querySelectorAll(".basic-flight-card-layout-top-section-container");
+      const results = [];
 
-    for (let i = 0; i < Math.min(count, 10); i++) {
-      try {
-        const card = cards.nth(i);
+      for (const card of cards) {
+        const depTime = card.querySelector(".bound-departure-datetime")?.textContent.trim() || "--:--";
+        const arrTime = card.querySelector(".bound-arrival-datetime")?.textContent.trim() || "--:--";
+        const depAirport = card.querySelector(".bound-departure-airport")?.textContent.trim() || "";
+        const arrAirport = card.querySelector(".bound-arrival-airport")?.textContent.trim() || "";
+        const duration = card.querySelector(".duration-value")?.textContent.trim() || "";
+        const flightNums = [...card.querySelectorAll(".flight-number")].map((el) => el.textContent.trim());
+        const flightNumber = flightNums.join(" / ");
 
-        // 嘗試提取航班資訊（selector 需要根據實際頁面調整）
-        const flightNum = await card.locator('.flight-number, [class*="flightNo"]').textContent().catch(() => "CI???");
-        const departTime = await card.locator('.depart-time, [class*="departTime"]').textContent().catch(() => "--:--");
-        const arriveTime = await card.locator('.arrive-time, [class*="arriveTime"]').textContent().catch(() => "--:--");
-        const duration = await card.locator('.duration, [class*="duration"]').textContent().catch(() => "");
-        const priceText = await card.locator('.price, [class*="price"], .fare').textContent().catch(() => "0");
+        // 轉機判斷
+        const stopContainer = card.querySelector(".bound-nb-stop-container");
+        const hasStops = stopContainer?.classList.contains("has-stops");
+        const stopCount = hasStops
+          ? parseInt(stopContainer.querySelector(".nb-stop-shape")?.textContent.trim() || "1")
+          : 0;
 
-        // 解析價格（去除非數字字元）
-        const price = parseInt(priceText.replace(/[^0-9]/g, "")) || 0;
+        // 座位餘量
+        const seatsLeft = card.querySelector(".ribbon")?.textContent.trim() || "";
 
-        // 判斷是否直飛
-        const stopsText = await card.locator('.stops, [class*="stop"]').textContent().catch(() => "直飛");
-        const stops = stopsText.includes("直飛") || stopsText.includes("0") ? 0 : parseInt(stopsText.replace(/[^0-9]/g, "")) || 1;
+        // 各艙等票價
+        const fareButtons = card.querySelectorAll("button.flight-card-button-desktop-view");
+        const fares = [];
+        fareButtons.forEach((btn) => {
+          const name = btn.querySelector(".refx-fare-family-flight-card-name")?.textContent.trim() || "";
+          const priceEl = btn.querySelector("[data-amount]");
+          const price = priceEl ? parseInt(priceEl.getAttribute("data-amount")) : 0;
+          const mixCabin = btn.querySelector('[class*="mix"]')?.textContent.trim() || "";
+          fares.push({ name, price, mixCabin });
+        });
+
+        results.push({
+          depTime, arrTime, depAirport, arrAirport,
+          duration, flightNumber, stopCount, seatsLeft, fares,
+        });
+      }
+      return results;
+    });
+
+    // 把每個航班的各艙等拆成獨立的 flight 記錄
+    for (const data of flightData) {
+      for (const fare of data.fares) {
+        if (fare.price <= 0) continue;
+
+        // 判斷艙等
+        let cabinClass = "ECONOMY";
+        if (fare.name.includes("商務")) cabinClass = "BUSINESS";
+        else if (fare.name.includes("豪華經濟")) cabinClass = "PREMIUM_ECONOMY";
 
         flights.push({
-          flightNumber: flightNum.trim(),
-          departTime: departTime.trim(),
-          arriveTime: arriveTime.trim(),
-          duration: duration.trim(),
-          price,
+          flightNumber: data.flightNumber,
+          departTime: data.depTime,
+          arriveTime: data.arrTime,
+          duration: data.duration,
+          price: fare.price,
           currency: "TWD",
-          stops,
-          cabinClass: "ECONOMY",
+          stops: data.stopCount,
+          cabinClass,
+          cabinName: fare.name + (fare.mixCabin ? `（${fare.mixCabin}）` : ""),
+          seatsLeft: data.seatsLeft,
         });
-      } catch (e) {
-        logger.debug(`[華航] 解析第 ${i + 1} 筆航班失敗`, { error: e.message });
       }
     }
+
+    logger.info(`[華航] 解析到 ${flights.length} 筆票價（${flightData.length} 個航班）`);
   } catch (error) {
     logger.error("[華航] 解析結果失敗", { error: error.message });
   }
@@ -360,28 +410,27 @@ async function parseFlightResults(page) {
 }
 
 async function parseMilesResults(page) {
-  // 里程票結果解析（結構類似，但價格欄位是里程數 + 稅金）
+  // 里程票結果解析（需要登入後實際測試 DOM 結構）
   const flights = [];
 
   try {
-    const cards = page.locator('.flight-result, .flight-card, [class*="award"]');
+    const cards = page.locator(".basic-flight-card-layout-top-section-container");
     const count = await cards.count();
 
     for (let i = 0; i < Math.min(count, 10); i++) {
       try {
         const card = cards.nth(i);
-        const flightNum = await card.locator('.flight-number').textContent().catch(() => "CI???");
-        const departTime = await card.locator('.depart-time').textContent().catch(() => "--:--");
-        const arriveTime = await card.locator('.arrive-time').textContent().catch(() => "--:--");
-        const milesText = await card.locator('.miles, [class*="mile"]').textContent().catch(() => "0");
-        const taxText = await card.locator('.tax, [class*="tax"]').textContent().catch(() => "0");
+        const flightNum = await card.locator(".flight-number").first().textContent().catch(() => "CI???");
+        const departTime = await card.locator(".bound-departure-datetime").textContent().catch(() => "--:--");
+        const arriveTime = await card.locator(".bound-arrival-datetime").textContent().catch(() => "--:--");
+        const milesText = await card.locator("[data-amount]").first().getAttribute("data-amount").catch(() => "0");
 
         flights.push({
           flightNumber: flightNum.trim(),
           departTime: departTime.trim(),
           arriveTime: arriveTime.trim(),
-          miles: parseInt(milesText.replace(/[^0-9]/g, "")) || 0,
-          taxes: parseInt(taxText.replace(/[^0-9]/g, "")) || 0,
+          miles: parseInt(milesText) || 0,
+          taxes: 0,
           currency: "TWD",
           cabinClass: "ECONOMY",
         });

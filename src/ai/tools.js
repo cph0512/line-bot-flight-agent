@@ -12,7 +12,7 @@ const tools = [
     name: "search_all_flights",
     description: `完整比價搜尋：同時查詢多家航空公司的現金票和里程兌換票。
 這是最常用的工具，當使用者想查機票、找航班、比價時使用。
-會同時查詢華航、長榮、星宇的官網，並比較現金買票和里程兌換哪個更划算。
+會同時查詢華航、長榮、星宇、阿聯酋、土航、國泰、新航的官網，並比較現金買票和里程兌換哪個更划算。
 從對話中提取出發地、目的地、日期。中文城市名轉 IATA 代碼（台北→TPE、東京→NRT）。
 沒有明確日期時先詢問使用者。預設從桃園(TPE)出發。`,
     input_schema: {
@@ -25,8 +25,8 @@ const tools = [
         adults: { type: "number", description: "成人人數，預設 1", default: 1 },
         airlines: {
           type: "array",
-          items: { type: "string", enum: ["CI", "BR", "JX"] },
-          description: "指定航空公司代碼。空陣列=查全部。CI=華航, BR=長榮, JX=星宇",
+          items: { type: "string", enum: ["CI", "BR", "JX", "EK", "TK", "CX", "SQ"] },
+          description: "指定航空公司代碼。空陣列=查全部。CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航",
         },
       },
       required: ["origin", "destination", "departDate"],
@@ -45,7 +45,7 @@ const tools = [
         adults: { type: "number", default: 1 },
         airlines: {
           type: "array",
-          items: { type: "string", enum: ["CI", "BR", "JX"] },
+          items: { type: "string", enum: ["CI", "BR", "JX", "EK", "TK", "CX", "SQ"] },
           description: "指定航空公司。空陣列=查全部。",
         },
       },
@@ -65,7 +65,7 @@ const tools = [
         adults: { type: "number", default: 1 },
         airlines: {
           type: "array",
-          items: { type: "string", enum: ["CI", "BR", "JX"] },
+          items: { type: "string", enum: ["CI", "BR", "JX", "EK", "TK", "CX", "SQ"] },
         },
       },
       required: ["origin", "destination", "departDate"],
