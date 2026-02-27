@@ -1,11 +1,11 @@
 // =============================================
 // Claude AI Agent（RPA 版）
 //
-// 核心大腦：
+// 核心流程：
 // 1. 接收使用者自然語言
 // 2. Claude 理解意圖
-// 3. 自動呼叫 RPA 爬蟲查詢航班
-// 4. 分析結果，給出建議
+// 3. Claude 呼叫工具 → RPA 爬蟲查詢航班
+// 4. 分析真實結果，給出建議
 // =============================================
 
 const Anthropic = require("@anthropic-ai/sdk").default;
@@ -22,64 +22,53 @@ const logger = require("../utils/logger");
 
 const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-const SYSTEM_PROMPT = `你是一個專業又親切的機票查詢助手，在 LINE 上幫助台灣使用者查詢和比較機票。
+const SYSTEM_PROMPT = `你是一個 LINE 機票查詢助手。你必須透過工具查詢航空公司官網取得真實資料。
 
-## 你的特殊能力
-你可以直接到各航空公司官網（華航、長榮、星宇、阿聯酋、土航、國泰、新航）查詢：
-- 💰 現金票價
-- 🎯 里程兌換票價
-- 📊 並比較哪種方式最划算
+## 最重要的規則（絕對不可違反）
+1. 你「一定」要使用 search_all_flights 或 search_cash_only 工具去查詢。不可以自己回答航班問題。
+2. 你「只能」使用工具回傳的資料。不可以自己編造、預估、猜測任何航班資訊。
+3. 如果工具回傳錯誤或空結果，你只能說「查詢失敗，請直接到航空公司官網查詢」，然後用 get_booking_links 工具提供官網連結。
+4. 絕對禁止輸出以下內容：自行編造的價格、預估價格範圍、機型資訊、飛行時間、航班號碼。這些全部必須來自工具查詢結果。
+5. 絕對禁止使用「預估」、「大約」、「一般來說」、「通常」、「約」等模糊詞彙來包裝你自己的猜測。
 
-## 行為規則
-1. 用繁體中文回覆，語氣親切，善用 emoji
-2. 從對話提取：出發地（預設桃園TPE）、目的地、日期、人數
-3. 資訊不足時友善詢問（一次問一個問題就好）
-4. 搜尋需要時間（爬官網比 API 慢），先告知使用者「正在查詢中」
-5. 結果出來後整理重點：
-   - 💰 最便宜現金票
-   - ✈️ 直飛選項
-   - 🎯 里程兌換是否划算（與現金票比較）
-   - ⭐ 你推薦的最佳選項
-6. 給建議時考慮：價格、里程價值、飛行時間、轉機次數、航空公司服務品質
-7. 回覆簡潔，適合手機閱讀
-8. 無法直接訂票，找到航班後提供官網連結
+## 回覆規則
+- 用繁體中文，語氣親切，善用 emoji
+- 從對話提取：出發地（預設 TPE）、目的地、日期、人數
+- 資訊不足時友善詢問
+- 收到使用者查詢航班的請求時，立刻呼叫 search_all_flights 或 search_cash_only 工具
+- 查詢結果出來後只整理工具回傳的真實資料：最便宜現金票、直飛選項、里程分析、推薦
+- 回覆簡潔，適合手機閱讀
 
-## 嚴格禁止
-- 絕對不可以自己編造、估算、猜測機票價格或航班時刻
-- 只能使用工具回傳的真實資料
-- 如果工具查詢失敗或回傳空結果，直接告訴使用者「查詢失敗」並附上官網連結讓他們自己查
-- 不要說「預估」、「大約」、「一般來說」這類模糊用語來包裝虛構的價格
+## 查詢失敗時的唯一回覆格式
+如果所有航空公司都查詢失敗：
+「抱歉，目前無法從航空公司官網取得 [出發地] 到 [目的地] 的航班資料。請直接到以下官網查詢：[呼叫 get_booking_links 取得連結]」
+不可以額外補充任何你自己知道的航班、機型、飛行時間、直飛/轉機資訊。
 
-## 里程價值判斷基準
-- 每哩價值超過 NT$0.4 = 划算
-- 每哩價值超過 NT$0.6 = 非常划算
-- 每哩價值低於 NT$0.3 = 不划算，建議用現金買
+## 里程價值判斷
+- 每哩 > NT$0.4 = 划算
+- 每哩 > NT$0.6 = 非常划算
+- 每哩 < NT$0.3 = 不划算
 
-## 航空公司資訊
-- 華航(CI)：天合聯盟，華夏會員，Dynasty Flyer 里程
-- 長榮(BR)：星空聯盟，無限萬哩遊，Infinity MileageLands
-- 星宇(JX)：無聯盟，COSMILE 里程計畫
-- 阿聯酋(EK)：無聯盟，Skywards 里程計畫
-- 土耳其航空(TK)：星空聯盟，Miles&Smiles 里程計畫
-- 國泰(CX)：寰宇一家，Asia Miles 亞洲萬里通
-- 新加坡航空(SQ)：星空聯盟，KrisFlyer 里程計畫
+## 航空公司
+CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 
 ## 城市代碼
 台北:TPE 高雄:KHH 東京(成田):NRT 東京(羽田):HND 大阪:KIX
 名古屋:NGO 福岡:FUK 札幌:CTS 沖繩:OKA
 首爾:ICN 釜山:PUS 曼谷:BKK 新加坡:SIN
-香港:HKG 上海:PVG 倫敦:LHR 巴黎:CDG 紐約:JFK 洛杉磯:LAX
-杜拜:DXB 伊斯坦堡:IST 吉隆坡:KUL 雪梨:SYD 墨爾本:MEL`;
+香港:HKG 上海:PVG 倫敦:LHR 巴黎:CDG
+紐約:JFK 洛杉磯:LAX 杜拜:DXB 伊斯坦堡:IST
+吉隆坡:KUL 雪梨:SYD 墨爾本:MEL`;
 
 // 對話記錄
 const conversations = new Map();
 const MAX_HISTORY = 20;
 
 /**
- * 處理使用者訊息
+ * 處理使用者訊息 - 主入口
  */
 async function handleMessage(userId, userMessage) {
-  logger.info("收到訊息", { userId: userId.slice(-6), message: userMessage });
+  logger.info(`[AI] === 收到訊息 === userId=${userId.slice(-6)} msg="${userMessage}"`);
 
   if (!conversations.has(userId)) conversations.set(userId, []);
   const history = conversations.get(userId);
@@ -89,75 +78,92 @@ async function handleMessage(userId, userMessage) {
   try {
     const response = await runAgentLoop(history);
     history.push({ role: "assistant", content: response.text });
-    return response; // { text, flights? }
+    logger.info(`[AI] === 回覆完成 === flights=${response.flights?.length || 0} textLen=${response.text?.length || 0}`);
+    return response;
   } catch (error) {
-    logger.error("AI 處理失敗", { error: error.message });
-    return { text: "抱歉，我遇到問題了 😅 請稍後再試！" };
+    logger.error("[AI] handleMessage 失敗", { error: error.message, stack: error.stack });
+    return { text: `抱歉，系統發生錯誤：${error.message}\n請稍後再試！` };
   }
 }
 
 /**
  * AI Agent 迴圈 - Claude 可能呼叫多個工具
- * @returns {{ text: string, flights?: Array }} AI 回覆文字 + 可選的航班資料
+ * 加入 60 秒超時保護（LINE replyToken 有效時間有限）
  */
 async function runAgentLoop(history) {
   const messages = [...history];
   let iterations = 5;
-  let lastFlights = null; // 保留最後一次工具回傳的航班資料
+  let lastFlights = null;
 
-  while (iterations-- > 0) {
-    const res = await anthropic.messages.create({
-      model: config.anthropic.model,
-      max_tokens: 2000,
-      system: SYSTEM_PROMPT,
-      tools,
-      messages,
-    });
+  // 整體超時保護：60 秒
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("AI 處理超時（60 秒）")), 60000)
+  );
 
-    // AI 直接回覆
-    if (res.stop_reason === "end_turn") {
-      const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const agentWork = async () => {
+    while (iterations-- > 0) {
+      logger.info(`[AI] 呼叫 Claude API... (剩餘迴圈=${iterations + 1})`);
+
+      const res = await anthropic.messages.create({
+        model: config.anthropic.model,
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        tools,
+        messages,
+      });
+
+      logger.info(`[AI] Claude 回應: stop_reason=${res.stop_reason}, content_types=[${res.content.map((b) => b.type).join(",")}]`);
+
+      // AI 直接回覆（沒有呼叫工具）
+      if (res.stop_reason === "end_turn") {
+        const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+        logger.info(`[AI] 直接回覆（未呼叫工具）textLen=${text.length}`);
+        return { text, flights: lastFlights };
+      }
+
+      // AI 要求使用工具
+      if (res.stop_reason === "tool_use") {
+        messages.push({ role: "assistant", content: res.content });
+        const toolResults = [];
+
+        for (const tu of res.content.filter((b) => b.type === "tool_use")) {
+          logger.info(`[AI] >>> 呼叫工具: ${tu.name}`, { input: JSON.stringify(tu.input) });
+
+          const startTime = Date.now();
+          const result = await executeTool(tu.name, tu.input);
+          const elapsed = Date.now() - startTime;
+
+          logger.info(`[AI] <<< 工具完成: ${tu.name} (${elapsed}ms) flightsFound=${result.flights?.length || 0}`);
+
+          if (result.flights && result.flights.length > 0) {
+            lastFlights = result.flights;
+          }
+
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: typeof result.text === "string" ? result.text : JSON.stringify(result.text),
+          });
+        }
+
+        messages.push({ role: "user", content: toolResults });
+        continue;
+      }
+
+      // 其他情況
+      const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
+        || "可以再說清楚一點嗎？";
       return { text, flights: lastFlights };
     }
 
-    // AI 要求使用工具
-    if (res.stop_reason === "tool_use") {
-      messages.push({ role: "assistant", content: res.content });
-      const toolResults = [];
+    return { text: "查詢太複雜了，試試：「台北飛東京 3/15-3/20」" };
+  };
 
-      for (const tu of res.content.filter((b) => b.type === "tool_use")) {
-        logger.info(`🔧 呼叫工具: ${tu.name}`, { input: tu.input });
-
-        const result = await executeTool(tu.name, tu.input);
-
-        // 保留航班資料供 Flex Message 使用
-        if (result.flights && result.flights.length > 0) {
-          lastFlights = result.flights;
-        }
-
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: typeof result.text === "string" ? result.text : JSON.stringify(result.text),
-        });
-      }
-
-      messages.push({ role: "user", content: toolResults });
-      continue;
-    }
-
-    // 其他情況
-    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
-      || "可以再說清楚一點嗎？";
-    return { text, flights: lastFlights };
-  }
-
-  return { text: "查詢太複雜了 😅 試試：「台北飛東京 3/15-3/20」" };
+  return Promise.race([agentWork(), timeout]);
 }
 
 /**
- * 執行工具
- * @returns {{ text: string, flights?: Array }} 工具結果文字 + 可選的航班陣列
+ * 執行工具 - 呼叫對應的爬蟲
  */
 async function executeTool(name, input) {
   const params = {
@@ -169,16 +175,19 @@ async function executeTool(name, input) {
   };
   const airlines = input.airlines || [];
 
+  logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate} airlines=[${airlines.join(",")}]`);
+
   switch (name) {
     case "search_all_flights": {
       try {
         const result = await searchAll(params, airlines);
         const text = formatResultsForAI(result);
-        // 合併現金票和里程票的航班資料，以現金票為優先（用於 Flex Message）
         const flights = extractFlightsForFlex(result);
+        logger.info(`[Tool] search_all 完成: cashFlights=${result.cash?.flights?.length || 0} milesFlights=${result.miles?.flights?.length || 0}`);
         return { text, flights };
       } catch (e) {
-        return { text: `完整比價搜尋失敗：${e.message}` };
+        logger.error(`[Tool] search_all 失敗`, { error: e.message, stack: e.stack });
+        return { text: `完整比價搜尋失敗：${e.message}\n\n所有航空公司爬蟲都失敗了。原因可能是：瀏覽器啟動失敗、航空公司網站改版、或網路問題。` };
       }
     }
 
@@ -187,8 +196,10 @@ async function executeTool(name, input) {
         const result = await searchCashFlights(params, airlines);
         const text = formatResultsForAI(result);
         const flights = result.flights || [];
+        logger.info(`[Tool] search_cash 完成: flights=${flights.length}`);
         return { text, flights };
       } catch (e) {
+        logger.error(`[Tool] search_cash 失敗`, { error: e.message, stack: e.stack });
         return { text: `現金票搜尋失敗：${e.message}` };
       }
     }
@@ -197,15 +208,17 @@ async function executeTool(name, input) {
       try {
         const result = await searchMilesFlights(params, airlines);
         const text = formatResultsForAI(result);
-        return { text, flights: [] }; // 里程票不適合 Flex 比價（無現金價格）
+        logger.info(`[Tool] search_miles 完成: flights=${result.flights?.length || 0}`);
+        return { text, flights: [] };
       } catch (e) {
+        logger.error(`[Tool] search_miles 失敗`, { error: e.message, stack: e.stack });
         return { text: `里程票搜尋失敗：${e.message}` };
       }
     }
 
     case "get_booking_links": {
       const links = getBookingLinks(params);
-      const text = links.map((l) => `🔗 ${l.airline}:\n${l.url}`).join("\n\n");
+      const text = links.map((l) => `${l.airline}: ${l.url}`).join("\n");
       return { text };
     }
 
@@ -216,17 +229,13 @@ async function executeTool(name, input) {
 
 /**
  * 從完整比價結果提取航班資料供 Flex Message 使用
- * 優先使用現金票（有明確價格），最多取 10 筆
  */
 function extractFlightsForFlex(result) {
   const flights = [];
 
-  // 優先使用現金票
   if (result.cash && result.cash.flights && result.cash.flights.length > 0) {
     flights.push(...result.cash.flights);
   }
-
-  // 如果現金票為空，但有里程票則不加入（里程票缺少現金價格，不適合比價卡片）
 
   return flights.slice(0, 10);
 }

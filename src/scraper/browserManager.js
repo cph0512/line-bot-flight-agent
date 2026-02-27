@@ -3,8 +3,8 @@
 //
 // 管理瀏覽器的生命週期：
 // - 啟動/關閉 Chromium
-// - 頁面池（重複使用頁面，避免反覆開關）
-// - 反偵測設定（讓網站以為是真人瀏覽）
+// - 反偵測設定
+// - Railway / Docker 環境相容
 // =============================================
 
 const { chromium } = require("playwright");
@@ -12,7 +12,6 @@ const { config } = require("../config");
 const logger = require("../utils/logger");
 
 let browser = null;
-const pagePool = []; // 可重複使用的頁面
 
 /**
  * 取得或啟動瀏覽器
@@ -20,27 +19,38 @@ const pagePool = []; // 可重複使用的頁面
 async function getBrowser() {
   if (browser && browser.isConnected()) return browser;
 
-  logger.info("🚀 啟動 Chromium 瀏覽器...");
+  logger.info("[Browser] 啟動 Chromium...");
 
-  browser = await chromium.launch({
-    headless: config.browser.headless,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled", // 反偵測
-      "--disable-web-security",
-      "--lang=zh-TW",
-    ],
-  });
+  try {
+    browser = await chromium.launch({
+      headless: config.browser.headless,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",            // Railway/Docker 共享記憶體不足
+        "--disable-blink-features=AutomationControlled",
+        "--disable-web-security",
+        "--disable-gpu",                       // Docker 環境無 GPU
+        "--lang=zh-TW",
+        "--single-process",                    // 減少記憶體用量
+      ],
+    });
 
-  // 瀏覽器意外關閉時清理
-  browser.on("disconnected", () => {
-    logger.warn("瀏覽器斷線");
-    browser = null;
-    pagePool.length = 0;
-  });
+    logger.info("[Browser] Chromium 啟動成功");
 
-  return browser;
+    browser.on("disconnected", () => {
+      logger.warn("[Browser] 瀏覽器斷線");
+      browser = null;
+    });
+
+    return browser;
+  } catch (error) {
+    logger.error("[Browser] Chromium 啟動失敗！", {
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -50,13 +60,11 @@ async function createPage() {
   const b = await getBrowser();
 
   const context = await b.newContext({
-    // 模擬真實瀏覽器
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport: { width: 1366, height: 768 },
     locale: "zh-TW",
     timezoneId: "Asia/Taipei",
-    // 接受 cookie
     ignoreHTTPSErrors: true,
   });
 
@@ -64,21 +72,13 @@ async function createPage() {
 
   // 隱藏 Playwright 自動化特徵
   await page.addInitScript(() => {
-    // 移除 webdriver 標記
     Object.defineProperty(navigator, "webdriver", { get: () => false });
-    // 偽造 plugins
-    Object.defineProperty(navigator, "plugins", {
-      get: () => [1, 2, 3, 4, 5],
-    });
-    // 偽造語言
-    Object.defineProperty(navigator, "languages", {
-      get: () => ["zh-TW", "zh", "en-US", "en"],
-    });
+    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, "languages", { get: () => ["zh-TW", "zh", "en-US", "en"] });
   });
 
-  // 設定預設超時
-  page.setDefaultTimeout(30000); // 30 秒
-  page.setDefaultNavigationTimeout(45000); // 45 秒
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(45000);
 
   return page;
 }
@@ -92,7 +92,7 @@ async function closePage(page) {
       await page.context().close();
     }
   } catch (e) {
-    logger.debug("關閉頁面時發生錯誤（可忽略）", { error: e.message });
+    logger.debug("[Browser] 關閉頁面時發生錯誤（可忽略）", { error: e.message });
   }
 }
 
@@ -103,7 +103,7 @@ async function takeScreenshot(page, name) {
   try {
     const path = `screenshots/${name}-${Date.now()}.png`;
     await page.screenshot({ path, fullPage: false });
-    logger.debug(`截圖已儲存: ${path}`);
+    logger.debug(`[Browser] 截圖已儲存: ${path}`);
     return path;
   } catch {
     return null;
@@ -122,7 +122,7 @@ async function waitAndRetry(page, selector, options = {}) {
       return true;
     } catch {
       if (i < retries) {
-        logger.debug(`等待 ${selector} 失敗，重試 ${i + 1}/${retries}`);
+        logger.debug(`[Browser] 等待 ${selector} 失敗，重試 ${i + 1}/${retries}`);
         await page.waitForTimeout(2000);
       }
     }
@@ -139,11 +139,29 @@ async function humanDelay(page, min = 500, max = 1500) {
 }
 
 /**
+ * 測試瀏覽器是否能正常啟動（診斷用）
+ */
+async function testBrowserLaunch() {
+  let testBrowser = null;
+  try {
+    testBrowser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    });
+    const version = testBrowser.version();
+    await testBrowser.close();
+    return { success: true, version };
+  } catch (error) {
+    if (testBrowser) await testBrowser.close().catch(() => {});
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * 關閉所有瀏覽器資源
  */
 async function shutdown() {
-  logger.info("正在關閉瀏覽器...");
-  pagePool.length = 0;
+  logger.info("[Browser] 正在關閉瀏覽器...");
   if (browser) {
     await browser.close().catch(() => {});
     browser = null;
@@ -157,5 +175,6 @@ module.exports = {
   takeScreenshot,
   waitAndRetry,
   humanDelay,
+  testBrowserLaunch,
   shutdown,
 };
