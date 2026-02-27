@@ -172,10 +172,11 @@ async function executeTool(name, input) {
     departDate: input.departDate,
     returnDate: input.returnDate || null,
     adults: input.adults || 1,
+    cabinClass: input.cabinClass || null,
   };
   const airlines = input.airlines || [];
 
-  logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate} airlines=[${airlines.join(",")}]`);
+  logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate} cabin=${params.cabinClass || "ALL"} airlines=[${airlines.join(",")}]`);
 
   switch (name) {
     case "search_all_flights": {

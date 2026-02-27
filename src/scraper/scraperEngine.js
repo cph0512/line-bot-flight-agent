@@ -52,28 +52,32 @@ function withTimeout(promise, ms, label) {
  * 搜尋現金票 — Amadeus 優先，RPA 備援
  */
 async function searchCashFlights(params, airlines = []) {
-  logger.info(`[Engine] 搜尋現金票 ${params.origin}→${params.destination} ${params.departDate}`);
+  logger.info(`[Engine] 搜尋現金票 ${params.origin}→${params.destination} ${params.departDate} cabin=${params.cabinClass || "ALL"}`);
 
   // 策略 1：Amadeus API（快速可靠）
   if (amadeusClient.isAvailable()) {
     logger.info("[Engine] 使用 Amadeus API 查詢...");
-    const apiResult = await amadeusClient.searchFlights(params, airlines);
+    try {
+      const apiResult = await amadeusClient.searchFlights(params, airlines);
 
-    if (apiResult.success && apiResult.flights.length > 0) {
-      logger.info(`[Engine] Amadeus 成功：${apiResult.flights.length} 筆航班`);
-      // 只取去程航班（outbound）用於顯示
-      const outboundFlights = apiResult.flights.filter((f) => f.direction === "outbound");
-      return {
-        success: true,
-        type: "cash",
-        flights: outboundFlights.length > 0 ? outboundFlights : apiResult.flights,
-        totalResults: outboundFlights.length || apiResult.flights.length,
-        queriedAirlines: [...new Set(apiResult.flights.map((f) => f.airlineName))],
-        source: "amadeus",
-      };
+      if (apiResult.success && apiResult.flights.length > 0) {
+        logger.info(`[Engine] Amadeus 成功：${apiResult.flights.length} 筆航班`);
+        // 只取去程航班（outbound）用於顯示
+        const outboundFlights = apiResult.flights.filter((f) => f.direction === "outbound");
+        return {
+          success: true,
+          type: "cash",
+          flights: outboundFlights.length > 0 ? outboundFlights : apiResult.flights,
+          totalResults: outboundFlights.length || apiResult.flights.length,
+          queriedAirlines: [...new Set(apiResult.flights.map((f) => f.airlineName))],
+          source: "amadeus",
+        };
+      }
+
+      logger.warn(`[Engine] Amadeus 失敗：${apiResult.error || "無結果"}`);
+    } catch (err) {
+      logger.error(`[Engine] Amadeus 異常：${err.message}`);
     }
-
-    logger.warn(`[Engine] Amadeus 失敗：${apiResult.error || "無結果"}`);
   }
 
   // 策略 2：RPA Stealth 爬蟲（備援）

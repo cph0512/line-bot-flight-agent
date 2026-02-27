@@ -61,6 +61,20 @@ function getClient() {
 }
 
 /**
+ * 帶超時的 Promise（防止 API 卡死）
+ */
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} 超時（${ms / 1000}秒）`)), ms);
+    promise
+      .then((r) => { clearTimeout(timer); resolve(r); })
+      .catch((e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+const AMADEUS_TIMEOUT = 15000; // 15 秒超時
+
+/**
  * 搜尋航班（現金票）
  *
  * @param {Object} params
@@ -99,7 +113,12 @@ async function searchFlights(params, airlines = []) {
       queryParams.includedAirlineCodes = airlines.join(",");
     }
 
-    const response = await client.shopping.flightOffersSearch.get(queryParams);
+    // 加上超時保護，防止 Amadeus API 無回應導致整個 bot 卡死
+    const response = await withTimeout(
+      client.shopping.flightOffersSearch.get(queryParams),
+      AMADEUS_TIMEOUT,
+      "Amadeus API"
+    );
 
     const dictionaries = response.result?.dictionaries || {};
     const offers = response.data || [];
@@ -121,6 +140,37 @@ async function searchFlights(params, airlines = []) {
       : error.message;
     logger.error(`[Amadeus] 查詢失敗: ${errMsg}`);
     return { success: false, error: `Amadeus API 錯誤: ${errMsg}` };
+  }
+}
+
+/**
+ * 快速測試 Amadeus API 連線（用於 /health 端點）
+ */
+async function testConnection() {
+  const client = getClient();
+  if (!client) {
+    return { success: false, error: "未設定 API 金鑰" };
+  }
+  try {
+    // 用一個簡單查詢測試連線（只取 1 筆）
+    const response = await withTimeout(
+      client.shopping.flightOffersSearch.get({
+        originLocationCode: "TPE",
+        destinationLocationCode: "NRT",
+        departureDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+        adults: "1",
+        max: "1",
+      }),
+      10000,
+      "Amadeus 測試"
+    );
+    const count = response.data?.length || 0;
+    return { success: true, message: `連線成功，取得 ${count} 筆測試結果` };
+  } catch (error) {
+    const errMsg = error.response?.body
+      ? JSON.stringify(error.response.body).slice(0, 200)
+      : error.message;
+    return { success: false, error: errMsg };
   }
 }
 
@@ -236,6 +286,7 @@ function isAvailable() {
 module.exports = {
   searchFlights,
   isAvailable,
+  testConnection,
   CARRIER_NAMES,
   CABIN_NAMES,
 };

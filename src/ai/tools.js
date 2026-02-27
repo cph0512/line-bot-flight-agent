@@ -28,6 +28,11 @@ const tools = [
           items: { type: "string", enum: ["CI", "BR", "JX", "EK", "TK", "CX", "SQ"] },
           description: "指定航空公司代碼。空陣列=查全部。CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航",
         },
+        cabinClass: {
+          type: "string",
+          enum: ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"],
+          description: "艙等篩選。ECONOMY=經濟艙, PREMIUM_ECONOMY=豪華經濟艙, BUSINESS=商務艙, FIRST=頭等艙。不指定則查全部艙等。",
+        },
       },
       required: ["origin", "destination", "departDate"],
     },
@@ -47,6 +52,11 @@ const tools = [
           type: "array",
           items: { type: "string", enum: ["CI", "BR", "JX", "EK", "TK", "CX", "SQ"] },
           description: "指定航空公司。空陣列=查全部。",
+        },
+        cabinClass: {
+          type: "string",
+          enum: ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"],
+          description: "艙等篩選。",
         },
       },
       required: ["origin", "destination", "departDate"],
