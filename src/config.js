@@ -13,6 +13,12 @@ const config = {
     headless: process.env.BROWSER_HEADLESS !== "false",
     maxPages: parseInt(process.env.BROWSER_MAX_PAGES) || 3,
   },
+  // Amadeus API（主要航班資料來源）
+  amadeus: {
+    clientId: process.env.AMADEUS_CLIENT_ID,
+    clientSecret: process.env.AMADEUS_CLIENT_SECRET,
+    production: process.env.AMADEUS_PRODUCTION === "true",
+  },
   // 里程帳號（選填）
   mileageAccounts: {
     CI: { id: process.env.CI_MEMBER_ID, password: process.env.CI_MEMBER_PASSWORD },
@@ -57,9 +63,14 @@ function validateConfig() {
     process.exit(1);
   }
 
-  // 顯示 API key 前幾個字元（確認設定正確）
+  // 顯示設定狀態
   console.log(`[Config] ANTHROPIC_API_KEY: ${config.anthropic.apiKey.slice(0, 12)}...`);
   console.log(`[Config] ANTHROPIC_MODEL: ${config.anthropic.model}`);
+  if (config.amadeus.clientId) {
+    console.log(`[Config] AMADEUS: ${config.amadeus.production ? "production" : "test"} (已設定)`);
+  } else {
+    console.log(`[Config] AMADEUS: 未設定（將使用 RPA 爬蟲作為替代）`);
+  }
 
   // 里程帳號提醒
   const noMileage = Object.entries(config.mileageAccounts)

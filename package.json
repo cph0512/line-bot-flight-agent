@@ -10,14 +10,17 @@
     "test-scraper": "node src/scraper/test.js"
   },
   "dependencies": {
-    "@line/bot-sdk": "^9.6.0",
     "@anthropic-ai/sdk": "^0.39.0",
-    "playwright": "^1.49.0",
-    "express": "^4.21.0",
-    "dotenv": "^16.4.0",
+    "@line/bot-sdk": "^9.6.0",
+    "amadeus": "^11.0.0",
     "dayjs": "^1.11.13",
-    "winston": "^3.17.0",
-    "p-queue": "^6.6.2"
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "p-queue": "^6.6.2",
+    "playwright": "^1.49.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
