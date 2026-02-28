@@ -8,7 +8,7 @@ const config = {
   // AI 模型（支援 Gemini 或 Anthropic）
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,

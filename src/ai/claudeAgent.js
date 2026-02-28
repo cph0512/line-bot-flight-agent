@@ -216,6 +216,8 @@ async function handleMessage(userId, userMessage) {
     const now = Date.now();
     const geminiAvailable = genAI && now > geminiCooldownUntil;
     const anthropicAvailable = !!anthropic;
+    // Anthropic fallback 開關（環境變數 AI_FALLBACK=true 啟用，預設關閉）
+    const fallbackEnabled = process.env.AI_FALLBACK === "true";
 
     let response;
 
@@ -224,34 +226,39 @@ async function handleMessage(userId, userMessage) {
       try {
         response = await runGeminiLoop(history);
       } catch (error) {
-        // 429 或其他 Gemini 錯誤 → 自動切到 Anthropic
+        // 429 或其他 Gemini 錯誤
         if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || error.message?.includes("quota")) {
-          logger.warn(`[AI] Gemini 額度用完，冷卻 10 分鐘，切換到 Anthropic`);
+          logger.warn(`[AI] Gemini 額度用完，冷卻 10 分鐘`);
           geminiCooldownUntil = now + 10 * 60 * 1000; // 10 分鐘冷卻
 
-          if (anthropicAvailable) {
+          if (fallbackEnabled && anthropicAvailable) {
+            logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
             response = await runAnthropicLoop(history);
           } else {
-            return { text: "⚠️ Gemini 免費額度已用完，請稍後再試（約 1 分鐘後重置）。\n\n如需立即使用，可設定 ANTHROPIC_API_KEY 作為備援。" };
+            return { text: "⚠️ Gemini 免費額度已用完，請稍後再試（約 1 分鐘後重置）。" };
           }
         } else {
-          // 其他錯誤也嘗試 fallback
+          // 其他錯誤
           logger.error(`[AI] Gemini 錯誤: ${error.message}`);
-          if (anthropicAvailable) {
-            logger.info("[AI] 自動切換到 Anthropic");
+          if (fallbackEnabled && anthropicAvailable) {
+            logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
             response = await runAnthropicLoop(history);
           } else {
-            throw error;
+            return { text: `⚠️ Gemini 處理失敗：${error.message}\n\n請再試一次，或換個方式問問看 🙏` };
           }
         }
       }
-    } else if (anthropicAvailable) {
-      // Gemini 冷卻中或沒有 key，用 Anthropic
+    } else if (fallbackEnabled && anthropicAvailable) {
+      // Gemini 冷卻中，且 fallback 啟用
       const cooldownRemain = Math.max(0, Math.ceil((geminiCooldownUntil - now) / 1000));
       if (geminiCooldownUntil > now) {
         logger.info(`[AI] Gemini 冷卻中（還剩 ${cooldownRemain}s），使用 Anthropic`);
       }
       response = await runAnthropicLoop(history);
+    } else if (geminiCooldownUntil > now) {
+      // Gemini 冷卻中，fallback 未啟用
+      const cooldownRemain = Math.max(0, Math.ceil((geminiCooldownUntil - now) / 1000));
+      return { text: `⚠️ Gemini 冷卻中（還剩 ${cooldownRemain} 秒），請稍後再試。` };
     } else {
       return { text: "未設定任何 AI API Key。請在環境變數設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY。" };
     }
