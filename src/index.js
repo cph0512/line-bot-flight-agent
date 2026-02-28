@@ -116,6 +116,42 @@ app.get("/health", async (req, res) => {
   res.status(allOk ? 200 : 500).json(report);
 });
 
+// ========== 行事曆診斷 ==========
+app.get("/debug/calendar", async (req, res) => {
+  const info = {
+    GOOGLE_SERVICE_ACCOUNT_KEY: process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+      ? `set (${process.env.GOOGLE_SERVICE_ACCOUNT_KEY.length} chars, starts: ${process.env.GOOGLE_SERVICE_ACCOUNT_KEY.slice(0, 20)}...)`
+      : "NOT SET",
+    GOOGLE_CALENDAR_ID: process.env.GOOGLE_CALENDAR_ID || "NOT SET",
+    isAvailable: calendarService.isAvailable(),
+  };
+
+  // 嘗試解析 JSON
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    try {
+      const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+      info.jsonParse = "OK";
+      info.client_email = parsed.client_email || "missing";
+      info.project_id = parsed.project_id || "missing";
+    } catch (e) {
+      info.jsonParse = `FAIL: ${e.message}`;
+    }
+  }
+
+  // 嘗試查詢
+  if (calendarService.isAvailable()) {
+    try {
+      const result = await calendarService.getEvents(null, new Date().toISOString().slice(0, 10));
+      info.apiTest = "OK";
+      info.apiResult = result.text?.slice(0, 100);
+    } catch (e) {
+      info.apiTest = `FAIL: ${e.message}`;
+    }
+  }
+
+  res.json(info);
+});
+
 // ========== LINE Webhook（必須放在 express.json() 之前！）==========
 // LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
 // 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
