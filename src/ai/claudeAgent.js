@@ -98,6 +98,8 @@ function getSystemPrompt() {
 3. 一般聊天：日常對話、問答、建議、翻譯、計算
 
 重要規則：
+- ⚡ 收到需要工具的請求時，立即呼叫工具，不要先回一段「我來幫你查」的文字。直接行動！
+- 台北=TPE、洛杉磯=LAX 等常見城市直接帶入機場代碼，不需要先呼叫 search_airport。
 - 當訊息中附有「網路搜尋結果」，你必須根據搜尋結果回覆，不可以說「查不到」。
 - 當你不確定答案或需要即時資訊時，呼叫 search_web 搜尋，不要自己猜。
 - 搜尋結果若有數據，直接引用；若搜尋結果不相關，才說「目前查不到確切資訊」。
@@ -305,17 +307,26 @@ async function runGeminiLoop(history) {
       parts: [{ text: msg.content }],
     }));
 
+    // 偵測是否為工具型查詢（航班/天氣/新聞/晨報/行程）
+    const lastUserMsg = history[history.length - 1]?.content || "";
+    const isToolQuery = FLIGHT_KEYWORDS.test(lastUserMsg) ||
+      /天氣|氣溫|下雨|溫度/.test(lastUserMsg) ||
+      /新聞|頭條|時事/.test(lastUserMsg) ||
+      /晨報|早報|簡報/.test(lastUserMsg) ||
+      /行程|行事曆|會議|排程/.test(lastUserMsg);
+
     const geminiConfig = {
       systemInstruction: getSystemPrompt(),
       tools: geminiTools,
       toolConfig: {
         functionCallingConfig: {
-          mode: "AUTO",
+          mode: isToolQuery ? "ANY" : "AUTO",  // 工具型查詢強制使用工具
         },
       },
     };
 
-    logger.info(`[AI] Gemini (${config.gemini.model}) contents=${contents.length}`);
+    logger.info(`[AI] Gemini (${config.gemini.model}) contents=${contents.length} toolMode=${isToolQuery ? "ANY" : "AUTO"}`);
+    let forcedToolOnce = isToolQuery; // 第一輪強制，後續改回 AUTO
 
     while (iterations-- > 0) {
       let response;
@@ -329,6 +340,12 @@ async function runGeminiLoop(history) {
         // 429 錯誤往上拋，讓 handleMessage 處理 fallback
         logger.error(`[AI] Gemini API 錯誤: ${e.message}`);
         throw e;
+      }
+
+      // 第一輪強制工具後，後續改回 AUTO（讓 AI 自由回覆分析結果）
+      if (forcedToolOnce) {
+        geminiConfig.toolConfig.functionCallingConfig.mode = "AUTO";
+        forcedToolOnce = false;
       }
 
       const functionCalls = response.functionCalls || [];
