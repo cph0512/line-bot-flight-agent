@@ -16,13 +16,35 @@ let authClient = null;
 
 function getAuth() {
   if (authClient) return authClient;
+
   const keyFile = config.calendar?.keyFile;
-  if (!keyFile) return null;
-  authClient = new google.auth.GoogleAuth({
-    keyFile,
-    scopes: ["https://www.googleapis.com/auth/calendar"],
-  });
-  return authClient;
+  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+
+  if (keyJson) {
+    // Railway / 雲端部署：直接從環境變數讀取 JSON 金鑰內容
+    try {
+      const credentials = JSON.parse(keyJson);
+      authClient = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ["https://www.googleapis.com/auth/calendar"],
+      });
+      return authClient;
+    } catch (e) {
+      logger.error(`[Calendar] GOOGLE_SERVICE_ACCOUNT_KEY JSON 解析失敗: ${e.message}`);
+      return null;
+    }
+  }
+
+  if (keyFile) {
+    // 本地開發：從檔案路徑讀取
+    authClient = new google.auth.GoogleAuth({
+      keyFile,
+      scopes: ["https://www.googleapis.com/auth/calendar"],
+    });
+    return authClient;
+  }
+
+  return null;
 }
 
 function getCalendarClient() {
@@ -32,7 +54,8 @@ function getCalendarClient() {
 }
 
 function isAvailable() {
-  return !!(config.calendar?.keyFile && config.calendar?.calendarId);
+  const hasKey = !!(config.calendar?.keyFile || process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  return !!(hasKey && config.calendar?.calendarId);
 }
 
 /**

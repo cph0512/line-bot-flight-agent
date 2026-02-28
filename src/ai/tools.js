@@ -133,7 +133,7 @@ const tools = [
           enum: ["general", "business", "technology", "sports", "entertainment", "health", "science"],
           description: "新聞分類，預設 general",
         },
-        count: { type: "number", description: "新聞筆數（1-10），預設 5", default: 5 },
+        count: { type: "number", description: "新聞筆數（1-10），預設 7", default: 7 },
         region: {
           type: "string",
           enum: ["tw", "world"],

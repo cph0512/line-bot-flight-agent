@@ -115,7 +115,28 @@ CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 - region="tw"（預設）台灣新聞，region="world" 國際新聞
 - 使用者說「國際新聞」「世界新聞」→ region="world"
 - 分類：general(綜合), business(財經), technology(科技), sports(體育), entertainment(娛樂), health(健康), science(科學)
-- 預設 5 筆，最多 10 筆
+- 預設 7 筆，最多 10 筆
+
+### 新聞回覆格式（嚴格遵守）
+收到新聞資料後，用以下格式回覆，不可自行重新分類或分組：
+
+📰 **{地區}{分類}新聞** ({日期})
+
+1️⃣ {新聞標題}
+📍{來源} | 🔗 連結
+
+2️⃣ {新聞標題}
+📍{來源} | 🔗 連結
+
+3️⃣ ...（依序列出全部新聞）
+
+規則：
+- 每則新聞用數字 emoji（1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣）編號
+- 「不可」自行歸納分類（例如不要分成「職棒相關」「經典賽相關」等子類別）
+- 「不可」用 bullet point（•）列表
+- 每則標題獨立一行，來源和連結在下一行
+- 如有連結則必須附上
+- 最後一行可加一句簡短的今日焦點總結
 
 ---
 ## 📅 行事曆管理
@@ -310,7 +331,7 @@ async function executeTool(name, input) {
 
   // === 新聞（永遠可用：Google News RSS）===
   if (name === "get_news") {
-    return await newsService.getNews(input.category || "general", input.count || 5, input.region || "tw");
+    return await newsService.getNews(input.category || "general", input.count || 7, input.region || "tw");
   }
 
   // === 行事曆：查詢 ===
