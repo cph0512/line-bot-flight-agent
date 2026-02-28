@@ -79,14 +79,15 @@ async function searchCashFlights(params, airlines = []) {
       const apiResult = await amadeusClient.searchFlights(params, airlines);
 
       if (apiResult.success && apiResult.flights.length > 0) {
-        logger.info(`[Engine] Amadeus 成功：${apiResult.flights.length} 筆航班`);
-        // 只取去程航班（outbound）用於顯示
-        const outboundFlights = apiResult.flights.filter((f) => f.direction === "outbound");
+        const outbound = apiResult.flights.filter((f) => f.direction === "outbound");
+        const inbound = apiResult.flights.filter((f) => f.direction === "inbound");
+        logger.info(`[Engine] Amadeus 成功：去程=${outbound.length} 回程=${inbound.length}`);
         return {
           success: true,
           type: "cash",
-          flights: outboundFlights.length > 0 ? outboundFlights : apiResult.flights,
-          totalResults: outboundFlights.length || apiResult.flights.length,
+          flights: outbound.length > 0 ? outbound : apiResult.flights,
+          inboundFlights: inbound,
+          totalResults: apiResult.flights.length,
           queriedAirlines: [...new Set(apiResult.flights.map((f) => f.airlineName))],
           source: "amadeus",
         };
@@ -231,6 +232,7 @@ async function searchAll(params, airlines = []) {
 
   return {
     cash: cashResults,
+    inbound: cashResults.inboundFlights || [],
     miles: { ...milesResults, flights: milesWithValue },
     comparison: generateComparison(cashResults.flights, milesWithValue),
   };
@@ -318,13 +320,16 @@ function formatResultsForAI(result) {
     }
     text += "\n";
 
-    text += "【現金票】\n";
+    text += "【去程航班（現金票）】\n";
     if (result.cash.flights.length > 0) {
       text += `查詢到的航空公司：${result.cash.queriedAirlines?.join(", ")}\n`;
+      const hasReturn = (result.inbound || []).length > 0;
+      if (hasReturn) text += "（票價為來回總價）\n";
       result.cash.flights.slice(0, 10).forEach((f) => {
         text += `${f.rank}. ${f.airlineName} ${f.flightNumber} `;
+        text += `${f.departAirport || ""}→${f.arriveAirport || ""} `;
         text += `${f.departTime}->${f.arriveTime} `;
-        if (f.price) text += `${formatPrice(f.price)} `;
+        if (f.price) text += `${formatPrice(f.price)}${hasReturn ? "(來回)" : ""} `;
         if (f.cabinName) text += `[${f.cabinName}] `;
         text += f.stops === 0 ? "直飛" : `轉機${f.stops}次`;
         if (f.aircraft) text += ` (${f.aircraft})`;
@@ -333,6 +338,22 @@ function formatResultsForAI(result) {
       });
     } else {
       text += "查無現金票結果\n";
+    }
+
+    // 回程航班
+    const inboundFlights = result.inbound || [];
+    if (inboundFlights.length > 0) {
+      text += "\n【回程航班】\n";
+      inboundFlights.slice(0, 10).forEach((f, i) => {
+        text += `${i + 1}. ${f.airlineName} ${f.flightNumber} `;
+        text += `${f.departAirport || ""}→${f.arriveAirport || ""} `;
+        text += `${f.departTime}->${f.arriveTime} `;
+        text += f.stops === 0 ? "直飛" : `轉機${f.stops}次`;
+        if (f.aircraft) text += ` (${f.aircraft})`;
+        if (f.duration) text += ` ${f.duration}`;
+        text += "\n";
+      });
+      text += "（以上價格皆為來回總價，含去回程）\n";
     }
 
     text += "\n【里程兌換票】\n";

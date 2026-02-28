@@ -48,16 +48,25 @@ function getSystemPrompt() {
 步驟 3：只有在步驟 1 完全失敗時 → 才呼叫 get_booking_links
 
 ## 回覆格式（收到航班資料後）
-用表格方式整理結果，格式如下：
+用表格方式整理結果。去程和回程分開列出，格式如下：
 
-✈️ **{出發地} → {目的地} 航班比價**
-📅 {日期} | {艙等}
+✈️ **去程：{出發地} → {目的地}**
+📅 {去程日期} | {艙等}
 
-| 排名 | 航空 | 航班 | 出發→抵達 | 飛行時間 | 機型 | 票價(TWD) |
-|------|------|------|----------|---------|------|----------|
-| 1 | 長榮 | BR6 | 10:20→07:00 | 13h40m | 777-300ER | 41,847 |
-| 2 | 華航 | CI32 | 23:55→11:00 | 16h05m | 777-300ER | 47,782 |
+| 排名 | 航空 | 航班 | 出發→抵達 | 飛行時間 | 機型 | 來回票價(TWD) |
+|------|------|------|----------|---------|------|-------------|
+| 1 | 長榮 | BR6 | 10:20→07:00 | 11h40m | 777-300ER | 28,266 |
+| 2 | 華航 | CI32 | 23:55→11:00 | 16h05m | 777-300ER | 33,782 |
 
+🔙 **回程：{目的地} → {出發地}**
+📅 {回程日期}
+
+| 排名 | 航空 | 航班 | 出發→抵達 | 飛行時間 | 機型 |
+|------|------|------|----------|---------|------|
+| 1 | 長榮 | BR11 | 00:05→05:25 | 14h20m | 777-300ER |
+| 2 | 華航 | CI33 | 12:00→17:30 | 13h30m | 777-300ER |
+
+⚠️ 票價為「來回總價」（含去回程），不要寫成單程價。
 💡 **推薦**：簡短推薦最佳選擇（最便宜/最快/直飛）
 
 ## 一般回覆規則
@@ -105,7 +114,7 @@ async function handleMessage(userId, userMessage) {
   try {
     const response = await runAgentLoop(history);
     history.push({ role: "assistant", content: response.text });
-    logger.info(`[AI] === 回覆完成 === flights=${response.flights?.length || 0} textLen=${response.text?.length || 0}`);
+    logger.info(`[AI] === 回覆完成 === 去程=${response.flights?.length || 0} 回程=${response.inboundFlights?.length || 0} textLen=${response.text?.length || 0}`);
     return response;
   } catch (error) {
     logger.error("[AI] handleMessage 失敗", { error: error.message, stack: error.stack });
@@ -120,6 +129,7 @@ async function runAgentLoop(history) {
   const messages = [...history];
   let iterations = 5;
   let lastFlights = null;
+  let lastInboundFlights = null;
 
   // 整體超時保護：50 秒
   const timeout = new Promise((_, reject) =>
@@ -144,7 +154,7 @@ async function runAgentLoop(history) {
       if (res.stop_reason === "end_turn") {
         const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
         logger.info(`[AI] 直接回覆（未呼叫工具）textLen=${text.length}`);
-        return { text, flights: lastFlights };
+        return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
       // AI 要求使用工具
@@ -164,6 +174,9 @@ async function runAgentLoop(history) {
           if (result.flights && result.flights.length > 0) {
             lastFlights = result.flights;
           }
+          if (result.inboundFlights && result.inboundFlights.length > 0) {
+            lastInboundFlights = result.inboundFlights;
+          }
 
           toolResults.push({
             type: "tool_result",
@@ -179,7 +192,7 @@ async function runAgentLoop(history) {
       // 其他情況
       const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
         || "可以再說清楚一點嗎？";
-      return { text, flights: lastFlights };
+      return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
     }
 
     return { text: "查詢太複雜了，試試：「台北飛東京 3/15-3/20」" };
@@ -209,9 +222,9 @@ async function executeTool(name, input) {
       try {
         const result = await searchAll(params, airlines);
         const text = formatResultsForAI(result);
-        const flights = extractFlightsForFlex(result);
-        logger.info(`[Tool] search_all 完成: cashFlights=${result.cash?.flights?.length || 0} milesFlights=${result.miles?.flights?.length || 0}`);
-        return { text, flights };
+        const { outbound, inbound } = extractFlightsForFlex(result);
+        logger.info(`[Tool] search_all 完成: 去程=${outbound.length} 回程=${inbound.length} milesFlights=${result.miles?.flights?.length || 0}`);
+        return { text, flights: outbound, inboundFlights: inbound };
       } catch (e) {
         logger.error(`[Tool] search_all 失敗`, { error: e.message, stack: e.stack });
         return { text: `搜尋失敗：${e.message}` };
@@ -222,9 +235,10 @@ async function executeTool(name, input) {
       try {
         const result = await searchCashFlights(params, airlines);
         const text = formatResultsForAI(result);
-        const flights = result.flights || [];
-        logger.info(`[Tool] search_cash 完成: flights=${flights.length}`);
-        return { text, flights };
+        const outbound = result.flights || [];
+        const inbound = result.inboundFlights || [];
+        logger.info(`[Tool] search_cash 完成: 去程=${outbound.length} 回程=${inbound.length}`);
+        return { text, flights: outbound, inboundFlights: inbound };
       } catch (e) {
         logger.error(`[Tool] search_cash 失敗`, { error: e.message, stack: e.stack });
         return { text: `現金票搜尋失敗：${e.message}` };
@@ -256,13 +270,25 @@ async function executeTool(name, input) {
 
 /**
  * 從完整比價結果提取航班資料供 Flex Message 使用
+ * 回傳 { outbound, inbound } 兩個陣列
  */
 function extractFlightsForFlex(result) {
-  const flights = [];
+  const outbound = [];
+  const inbound = [];
+
   if (result.cash && result.cash.flights && result.cash.flights.length > 0) {
-    flights.push(...result.cash.flights);
+    outbound.push(...result.cash.flights);
   }
-  return flights.slice(0, 10);
+  if (result.inbound && result.inbound.length > 0) {
+    inbound.push(...result.inbound);
+  } else if (result.cash && result.cash.inboundFlights && result.cash.inboundFlights.length > 0) {
+    inbound.push(...result.cash.inboundFlights);
+  }
+
+  return {
+    outbound: outbound.slice(0, 10),
+    inbound: inbound.slice(0, 10),
+  };
 }
 
 function clearHistory(userId) {

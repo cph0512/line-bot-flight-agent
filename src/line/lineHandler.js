@@ -61,13 +61,14 @@ async function handleSingleEvent(event) {
   // 組合回覆訊息（LINE 每次最多 5 則）
   const messages = [];
 
-  // 如果有航班資料，先送 Flex 比價卡片
+  // 如果有航班資料，先送 Flex 比價卡片（去程 + 回程）
   if (aiResponse.flights && aiResponse.flights.length > 0) {
     try {
-      const flexMsg = createFlightComparisonFlex(aiResponse.flights);
+      const inbound = aiResponse.inboundFlights || [];
+      const flexMsg = createFlightComparisonFlex(aiResponse.flights, inbound);
       if (flexMsg) {
         messages.push(flexMsg);
-        logger.info(`[LINE] 已建立 Flex Message: ${aiResponse.flights.length} 筆航班`);
+        logger.info(`[LINE] 已建立 Flex Message: 去程=${aiResponse.flights.length} 回程=${inbound.length}`);
       }
     } catch (flexErr) {
       logger.error("[LINE] Flex Message 建立失敗", { error: flexErr.message });

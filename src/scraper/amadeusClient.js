@@ -229,6 +229,13 @@ function parseOffer(offer, dictionaries, rank) {
     // 飛行時間
     const duration = parseDuration(itinerary.duration);
 
+    // 出發 / 抵達機場代碼
+    const departAirport = firstSeg.departure?.iataCode || "";
+    const arriveAirport = lastSeg.arrival?.iataCode || "";
+
+    // 是否為來回票
+    const isRoundTrip = (offer.itineraries || []).length > 1;
+
     results.push({
       rank,
       airline: mainCarrier,
@@ -236,8 +243,11 @@ function parseOffer(offer, dictionaries, rank) {
       flightNumber: flightNumbers.join(" / "),
       departTime,
       arriveTime,
+      departAirport,
+      arriveAirport,
       duration,
-      price: isOutbound ? totalPrice : undefined, // 價格只在去程顯示（是來回總價）
+      price: totalPrice, // 每筆都帶價格（來回總價），方便顯示
+      isRoundTrip,
       currency,
       stops,
       cabinClass,
