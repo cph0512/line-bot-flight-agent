@@ -72,10 +72,11 @@ function convertToolsToGemini(tools) {
     }
     return decl;
   });
-  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")} + googleSearch`);
+  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")}`);
+  // 注意：Gemini 2.5 Flash 不支援 googleSearch + functionDeclarations 混用
+  // 搜尋功能改由 search_web 工具（functionDeclarations）處理
   return [
     { functionDeclarations: declarations },
-    { googleSearch: {} },  // Google 原生搜尋（Gemini 2.5 API 已改用 googleSearch）
   ];
 }
 
