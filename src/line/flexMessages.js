@@ -220,6 +220,7 @@ function buildFlightBubble(flights, { title, headerColor, isRoundTrip, showPrice
             { type: "text", text: `💰 ${priceLabel} TWD ${cheapest.price.toLocaleString()}`, size: "sm", weight: "bold", color: "#CC0000", flex: 0 },
           ],
         },
+        { type: "text", text: "⚠️ 票價僅供參考，請以航空公司官網為準", size: "xxs", color: "#999999", margin: "sm" },
       ],
       paddingAll: "12px",
       backgroundColor: "#FFF8F8",
