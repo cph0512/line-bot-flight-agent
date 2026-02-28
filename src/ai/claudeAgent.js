@@ -177,7 +177,11 @@ const SEARCH_PATTERNS = [
   /演唱會|展覽|活動.*時間|時間.*活動/,
 ];
 
+// 航班相關查詢不走自動搜尋（交給 Gemini 用 search_google_flights）
+const FLIGHT_KEYWORDS = /機票|航班|飛|航空|直飛|轉機|商務艙|經濟艙|頭等艙|來回|單程|訂票/;
+
 function needsWebSearch(message) {
+  if (FLIGHT_KEYWORDS.test(message)) return false;
   return SEARCH_PATTERNS.some((pattern) => pattern.test(message));
 }
 
