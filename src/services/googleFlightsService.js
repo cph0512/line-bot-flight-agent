@@ -96,9 +96,11 @@ async function searchFlights(params) {
     currency = "TWD",
   } = params;
 
-  logger.info(`[GoogleFlights] 搜尋: ${origin}→${destination} ${departDate}${returnDate ? " 回 " + returnDate : " 單程"}`);
+  const isRoundTrip = !!returnDate;
+  logger.info(`[GoogleFlights] 搜尋: ${origin}→${destination} ${departDate}${isRoundTrip ? " 回 " + returnDate : " 單程"}`);
 
-  const apiParams = {
+  // === 去程搜尋（含來回票價） ===
+  const outboundParams = {
     departure_id: origin,
     arrival_id: destination,
     outbound_date: departDate,
@@ -111,24 +113,47 @@ async function searchFlights(params) {
     show_hidden: "1",
   };
 
-  if (returnDate) {
-    apiParams.return_date = returnDate;
+  if (isRoundTrip) {
+    outboundParams.return_date = returnDate;
   }
 
-  const data = await apiCall("/searchFlights", apiParams);
+  const outboundData = await apiCall("/searchFlights", outboundParams);
+  const outboundFlights = parseFlightResults(outboundData);
 
-  // 解析回應
-  const flights = parseFlightResults(data);
-
-  if (flights.length === 0) {
+  if (outboundFlights.length === 0) {
     return {
       text: `未找到 ${origin}→${destination} ${departDate} 的航班。建議調整日期或目的地。`,
       flights: [],
     };
   }
 
-  const text = formatFlightsText(flights, origin, destination, departDate, returnDate, currency);
-  return { text, flights };
+  // === 回程搜尋（反向單程，僅顯示回程航班資訊） ===
+  let returnFlights = [];
+  if (isRoundTrip) {
+    try {
+      logger.info(`[GoogleFlights] 搜尋回程: ${destination}→${origin} ${returnDate}`);
+      const returnParams = {
+        departure_id: destination,
+        arrival_id: origin,
+        outbound_date: returnDate,
+        adults: String(adults),
+        children: String(children),
+        travel_class: cabinClass,
+        currency,
+        language_code: "zh-TW",
+        country_code: "TW",
+        show_hidden: "1",
+      };
+      const returnData = await apiCall("/searchFlights", returnParams);
+      returnFlights = parseFlightResults(returnData);
+      logger.info(`[GoogleFlights] 回程找到 ${returnFlights.length} 個航班`);
+    } catch (e) {
+      logger.warn(`[GoogleFlights] 回程搜尋失敗，僅顯示去程: ${e.message}`);
+    }
+  }
+
+  const text = formatFlightsText(outboundFlights, returnFlights, origin, destination, departDate, returnDate, currency);
+  return { text, flights: outboundFlights, returnFlights };
 }
 
 /**
@@ -446,45 +471,73 @@ function formatDuration(minutes) {
   return h > 0 ? `${h}h${m > 0 ? m + "m" : ""}` : `${m}m`;
 }
 
-function formatFlightsText(flights, origin, destination, departDate, returnDate, currency) {
-  let text = `=== Google Flights 搜尋結果 ===\n`;
-  text += `${origin} → ${destination}\n`;
-  text += `📅 去程 ${departDate}${returnDate ? ` | 回程 ${returnDate}` : " | 單程"}\n`;
-  text += `找到 ${flights.length} 個航班方案\n\n`;
+/**
+ * 格式化單一航班資訊
+ */
+function formatSingleFlight(f, index, priceLabel) {
+  let text = `--- 方案 ${index + 1} ---\n`;
+  text += `✈️ ${f.airline}`;
+  if (f.flightNumber) text += ` ${f.flightNumber}`;
+  text += `\n`;
+  text += `🕐 ${f.departTime} → ${f.arriveTime}`;
+  if (f.durationText) text += ` (${f.durationText})`;
+  text += `\n`;
+  text += `📍 ${f.stopInfo}`;
+  if (f.stops > 0 && f.layovers?.length > 0) {
+    const layoverCities = f.layovers.map(l => `${l.city || l.name}${l.durationLabel ? " " + l.durationLabel : ""}`).filter(Boolean);
+    if (layoverCities.length > 0) text += ` — 經 ${layoverCities.join(", ")}`;
+  }
+  text += `\n`;
+  if (f.price) {
+    text += `💰 NT$${f.price.toLocaleString()}${priceLabel}\n`;
+  }
+  // 行李
+  if (f.bags) {
+    const bagInfo = [];
+    if (f.bags.carry_on) bagInfo.push(`手提 ${f.bags.carry_on} 件`);
+    if (f.bags.checked) bagInfo.push(`托運 ${f.bags.checked} 件`);
+    if (bagInfo.length > 0) text += `🧳 ${bagInfo.join(", ")}\n`;
+  }
+  // 碳排
+  if (f.carbonEmissions?.CO2e) {
+    const co2kg = Math.round(f.carbonEmissions.CO2e / 1000);
+    const diff = f.carbonEmissions.difference_percent || 0;
+    const diffText = diff > 0 ? `↑${diff}%` : diff < 0 ? `↓${Math.abs(diff)}%` : "";
+    text += `🌱 碳排 ${co2kg}kg CO₂${diffText ? ` (${diffText} vs 平均)` : ""}\n`;
+  }
+  return text;
+}
 
-  flights.forEach((f, i) => {
-    text += `--- 方案 ${i + 1} ---\n`;
-    text += `✈️ ${f.airline}`;
-    if (f.flightNumber) text += ` ${f.flightNumber}`;
-    text += `\n`;
-    text += `🕐 ${f.departTime} → ${f.arriveTime}`;
-    if (f.durationText) text += ` (${f.durationText})`;
-    text += `\n`;
-    text += `📍 ${f.stopInfo}`;
-    if (f.stops > 0 && f.layovers?.length > 0) {
-      const layoverCities = f.layovers.map(l => `${l.city || l.name}${l.durationLabel ? " " + l.durationLabel : ""}`).filter(Boolean);
-      if (layoverCities.length > 0) text += ` — 經 ${layoverCities.join(", ")}`;
-    }
-    text += `\n`;
-    if (f.price) {
-      text += `💰 NT$${f.price.toLocaleString()}\n`;
-    }
-    // 行李
-    if (f.bags) {
-      const bagInfo = [];
-      if (f.bags.carry_on) bagInfo.push(`手提 ${f.bags.carry_on} 件`);
-      if (f.bags.checked) bagInfo.push(`托運 ${f.bags.checked} 件`);
-      if (bagInfo.length > 0) text += `🧳 ${bagInfo.join(", ")}\n`;
-    }
-    // 碳排
-    if (f.carbonEmissions?.CO2e) {
-      const co2kg = Math.round(f.carbonEmissions.CO2e / 1000);
-      const diff = f.carbonEmissions.difference_percent || 0;
-      const diffText = diff > 0 ? `↑${diff}%` : diff < 0 ? `↓${Math.abs(diff)}%` : "";
-      text += `🌱 碳排 ${co2kg}kg CO₂${diffText ? ` (${diffText} vs 平均)` : ""}\n`;
-    }
+function formatFlightsText(outboundFlights, returnFlights, origin, destination, departDate, returnDate, currency) {
+  const isRoundTrip = !!returnDate && returnFlights.length > 0;
+
+  let text = `=== Google Flights 搜尋結果 ===\n`;
+  text += `${origin} ↔ ${destination}\n`;
+  text += `📅 去程 ${departDate}${returnDate ? ` | 回程 ${returnDate}` : " | 單程"}\n\n`;
+
+  // ── 去程 ──
+  text += `━━ ✈️ 去程 ${origin} → ${destination}（${departDate}）━━\n`;
+  text += `找到 ${outboundFlights.length} 個方案\n\n`;
+
+  const outboundPriceLabel = isRoundTrip ? "（來回）" : "";
+  outboundFlights.forEach((f, i) => {
+    text += formatSingleFlight(f, i, outboundPriceLabel);
     text += `\n`;
   });
+
+  // ── 回程 ──
+  if (isRoundTrip) {
+    text += `━━ ✈️ 回程 ${destination} → ${origin}（${returnDate}）━━\n`;
+    text += `找到 ${returnFlights.length} 個方案\n\n`;
+
+    // 回程用單程價格（參考用）
+    returnFlights.forEach((f, i) => {
+      text += formatSingleFlight(f, i, "（單程參考）");
+      text += `\n`;
+    });
+
+    text += `💡 去程票價已含來回，回程價格僅供航班時刻參考\n`;
+  }
 
   text += `📎 資料來源：Google Flights（透過 RapidAPI）`;
   return text;
