@@ -1,16 +1,18 @@
 // =============================================
-// Claude AI Agent（全能管家版 v3）
+// AI Agent（全能管家版 v4 — Gemini 版）
 //
 // 核心流程：
 // 1. 接收使用者自然語言
-// 2. Claude 理解意圖，自動選擇工具
+// 2. Gemini 理解意圖，自動選擇工具
 // 3. 執行工具：航班查詢/天氣/新聞/行事曆/晨報
 // 4. 分析結果，給出建議
+//
+// 支援 Gemini（預設）或 Anthropic（fallback）
 // =============================================
 
-const Anthropic = require("@anthropic-ai/sdk").default;
+const { GoogleGenAI } = require("@google/genai");
 const { config } = require("../config");
-const { tools } = require("./tools");
+const { tools: anthropicTools } = require("./tools");
 const {
   searchAll,
   searchCashFlights,
@@ -21,7 +23,58 @@ const {
 const { weatherService, newsService, calendarService, briefingService } = require("../services");
 const logger = require("../utils/logger");
 
-const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+// ========== AI Client 初始化 ==========
+const useGemini = !!config.gemini.apiKey;
+let genAI = null;
+let anthropic = null;
+
+if (useGemini) {
+  genAI = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+} else {
+  const Anthropic = require("@anthropic-ai/sdk").default;
+  anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+}
+
+// ========== 工具定義轉換（Anthropic → Gemini）==========
+function convertToolsToGemini(tools) {
+  return [{
+    functionDeclarations: tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: convertSchema(t.input_schema),
+    })),
+  }];
+}
+
+function convertSchema(schema) {
+  if (!schema) return undefined;
+  const result = {};
+
+  // 型別轉大寫（Gemini 格式）
+  if (schema.type) result.type = schema.type.toUpperCase();
+  if (schema.description) result.description = schema.description;
+  if (schema.enum) result.enum = schema.enum;
+  if (schema.required) result.required = schema.required;
+
+  // 遞迴轉換 properties
+  if (schema.properties) {
+    result.properties = {};
+    for (const [key, val] of Object.entries(schema.properties)) {
+      const prop = { ...val };
+      delete prop.default; // Gemini 不支援 default
+      result.properties[key] = convertSchema(prop);
+    }
+  }
+
+  // Array items
+  if (schema.items) {
+    result.items = convertSchema(schema.items);
+  }
+
+  return result;
+}
+
+const geminiTools = convertToolsToGemini(anthropicTools);
 
 /**
  * 動態生成系統提示（包含當天日期）
@@ -178,7 +231,10 @@ async function handleMessage(userId, userMessage) {
   while (history.length > MAX_HISTORY) history.shift();
 
   try {
-    const response = await runAgentLoop(history);
+    const response = useGemini
+      ? await runGeminiLoop(history)
+      : await runAnthropicLoop(history);
+
     history.push({ role: "assistant", content: response.text });
     logger.info(`[AI] === 回覆完成 === 去程=${response.flights?.length || 0} 回程=${response.inboundFlights?.length || 0} textLen=${response.text?.length || 0}`);
     return response;
@@ -188,42 +244,118 @@ async function handleMessage(userId, userMessage) {
   }
 }
 
-/**
- * AI Agent 迴圈 - Claude 可能呼叫多個工具
- */
-async function runAgentLoop(history) {
+// ================================================================
+// Gemini Agent Loop
+// ================================================================
+async function runGeminiLoop(history) {
+  let iterations = 5;
+  let lastFlights = null;
+  let lastInboundFlights = null;
+
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("AI 處理超時（55 秒）")), 55000)
+  );
+
+  const agentWork = async () => {
+    // 轉換歷史紀錄為 Gemini 格式
+    const geminiHistory = history.slice(0, -1).map((msg) => ({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    }));
+
+    const lastMessage = history[history.length - 1].content;
+
+    logger.info(`[AI] 呼叫 Gemini API (${config.gemini.model})... history=${geminiHistory.length}`);
+
+    const chat = genAI.chats.create({
+      model: config.gemini.model,
+      history: geminiHistory,
+      config: {
+        systemInstruction: getSystemPrompt(),
+        tools: geminiTools,
+      },
+    });
+
+    let response = await chat.sendMessage({ message: lastMessage });
+
+    while (iterations-- > 0) {
+      // 檢查是否有 function call
+      const functionCalls = response.functionCalls || [];
+
+      if (functionCalls.length === 0) {
+        // 純文字回覆
+        const text = response.text || "可以再說清楚一點嗎？";
+        logger.info(`[AI] Gemini 純文字回覆 textLen=${text.length}`);
+        return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
+      }
+
+      // 執行所有 function calls
+      const functionResponses = [];
+
+      for (const fc of functionCalls) {
+        logger.info(`[AI] >>> 呼叫工具: ${fc.name}`, { input: JSON.stringify(fc.args) });
+
+        const startTime = Date.now();
+        const result = await executeTool(fc.name, fc.args);
+        const elapsed = Date.now() - startTime;
+
+        logger.info(`[AI] <<< 工具完成: ${fc.name} (${elapsed}ms) flightsFound=${result.flights?.length || 0}`);
+
+        if (result.flights && result.flights.length > 0) {
+          lastFlights = result.flights;
+        }
+        if (result.inboundFlights && result.inboundFlights.length > 0) {
+          lastInboundFlights = result.inboundFlights;
+        }
+
+        functionResponses.push({
+          name: fc.name,
+          response: { result: typeof result.text === "string" ? result.text : JSON.stringify(result.text) },
+        });
+      }
+
+      // 把工具結果送回 Gemini
+      response = await chat.sendMessage({ message: functionResponses.map((fr) => ({ functionResponse: fr })) });
+    }
+
+    return { text: "查詢太複雜了，試試：「台北飛東京 3/15-3/20」" };
+  };
+
+  return Promise.race([agentWork(), timeout]);
+}
+
+// ================================================================
+// Anthropic Agent Loop (Fallback)
+// ================================================================
+async function runAnthropicLoop(history) {
   const messages = [...history];
   let iterations = 5;
   let lastFlights = null;
   let lastInboundFlights = null;
 
-  // 整體超時保護：55 秒（LINE replyToken 有效 60 秒）
   const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("AI 處理超時（55 秒）")), 55000)
   );
 
   const agentWork = async () => {
     while (iterations-- > 0) {
-      logger.info(`[AI] 呼叫 Claude API... (剩餘迴圈=${iterations + 1})`);
+      logger.info(`[AI] 呼叫 Anthropic API... (剩餘迴圈=${iterations + 1})`);
 
       const res = await anthropic.messages.create({
         model: config.anthropic.model,
         max_tokens: 2000,
         system: getSystemPrompt(),
-        tools,
+        tools: anthropicTools,
         messages,
       });
 
-      logger.info(`[AI] Claude 回應: stop_reason=${res.stop_reason}, content_types=[${res.content.map((b) => b.type).join(",")}]`);
+      logger.info(`[AI] Anthropic 回應: stop_reason=${res.stop_reason}`);
 
-      // AI 直接回覆（沒有呼叫工具）
       if (res.stop_reason === "end_turn") {
         const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-        logger.info(`[AI] 直接回覆（未呼叫工具）textLen=${text.length}`);
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
-      // AI 要求使用工具
       if (res.stop_reason === "tool_use") {
         messages.push({ role: "assistant", content: res.content });
         const toolResults = [];
@@ -235,14 +367,10 @@ async function runAgentLoop(history) {
           const result = await executeTool(tu.name, tu.input);
           const elapsed = Date.now() - startTime;
 
-          logger.info(`[AI] <<< 工具完成: ${tu.name} (${elapsed}ms) flightsFound=${result.flights?.length || 0}`);
+          logger.info(`[AI] <<< 工具完成: ${tu.name} (${elapsed}ms)`);
 
-          if (result.flights && result.flights.length > 0) {
-            lastFlights = result.flights;
-          }
-          if (result.inboundFlights && result.inboundFlights.length > 0) {
-            lastInboundFlights = result.inboundFlights;
-          }
+          if (result.flights && result.flights.length > 0) lastFlights = result.flights;
+          if (result.inboundFlights && result.inboundFlights.length > 0) lastInboundFlights = result.inboundFlights;
 
           toolResults.push({
             type: "tool_result",
@@ -255,7 +383,6 @@ async function runAgentLoop(history) {
         continue;
       }
 
-      // 其他情況
       const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
         || "可以再說清楚一點嗎？";
       return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
@@ -267,9 +394,9 @@ async function runAgentLoop(history) {
   return Promise.race([agentWork(), timeout]);
 }
 
-/**
- * 執行工具 - 呼叫對應的爬蟲
- */
+// ================================================================
+// 執行工具（共用，不分 AI 引擎）
+// ================================================================
 async function executeTool(name, input) {
   logger.info(`[Tool] ${name}`, { input: JSON.stringify(input) });
 
@@ -294,7 +421,7 @@ async function executeTool(name, input) {
           const result = await searchAll(params, airlines);
           const text = formatResultsForAI(result);
           const { outbound, inbound } = extractFlightsForFlex(result);
-          logger.info(`[Tool] search_all 完成: 去程=${outbound.length} 回程=${inbound.length} milesFlights=${result.miles?.flights?.length || 0}`);
+          logger.info(`[Tool] search_all 完成: 去程=${outbound.length} 回程=${inbound.length}`);
           return { text, flights: outbound, inboundFlights: inbound };
         } catch (e) {
           logger.error(`[Tool] search_all 失敗`, { error: e.message, stack: e.stack });
@@ -307,10 +434,8 @@ async function executeTool(name, input) {
           const text = formatResultsForAI(result);
           const outbound = result.flights || [];
           const inbound = result.inboundFlights || [];
-          logger.info(`[Tool] search_cash 完成: 去程=${outbound.length} 回程=${inbound.length}`);
           return { text, flights: outbound, inboundFlights: inbound };
         } catch (e) {
-          logger.error(`[Tool] search_cash 失敗`, { error: e.message, stack: e.stack });
           return { text: `現金票搜尋失敗：${e.message}` };
         }
       }
@@ -318,10 +443,8 @@ async function executeTool(name, input) {
         try {
           const result = await searchMilesFlights(params, airlines);
           const text = formatResultsForAI(result);
-          logger.info(`[Tool] search_miles 完成: flights=${result.flights?.length || 0}`);
           return { text, flights: [] };
         } catch (e) {
-          logger.error(`[Tool] search_miles 失敗`, { error: e.message, stack: e.stack });
           return { text: `里程票搜尋失敗：${e.message}` };
         }
       }
@@ -333,39 +456,27 @@ async function executeTool(name, input) {
     }
   }
 
-  // === 天氣（永遠可用：台灣用 CWA，國際用 Open-Meteo）===
+  // === 天氣 ===
   if (name === "get_weather") {
     return await weatherService.getWeather(input.city, input.days || 1);
   }
 
-  // === 新聞（永遠可用：Google News RSS）===
+  // === 新聞 ===
   if (name === "get_news") {
     return await newsService.getNews(input.category || "general", input.count || 7, input.region || "tw");
   }
 
-  // === 行事曆：查詢 ===
+  // === 行事曆 ===
   if (name === "get_events") {
-    if (!calendarService.isAvailable()) {
-      return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
-    }
+    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
     return await calendarService.getEvents(input.calendarName, input.startDate, input.endDate);
   }
-
-  // === 行事曆：新增 ===
   if (name === "add_event") {
-    if (!calendarService.isAvailable()) {
-      return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
-    }
-    return await calendarService.addEvent(
-      input.calendarName, input.summary, input.startTime, input.endTime, input.description
-    );
+    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
+    return await calendarService.addEvent(input.calendarName, input.summary, input.startTime, input.endTime, input.description);
   }
-
-  // === 行事曆：更新 ===
   if (name === "update_event") {
-    if (!calendarService.isAvailable()) {
-      return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
-    }
+    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
     const updates = {};
     if (input.summary) updates.summary = input.summary;
     if (input.startTime) updates.startTime = input.startTime;
@@ -373,25 +484,18 @@ async function executeTool(name, input) {
     if (input.description) updates.description = input.description;
     return await calendarService.updateEvent(input.eventId, input.calendarName, updates);
   }
-
-  // === 行事曆：刪除 ===
   if (name === "delete_event") {
-    if (!calendarService.isAvailable()) {
-      return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
-    }
+    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
     return await calendarService.deleteEvent(input.eventId, input.calendarName);
   }
 
   // === 每日晨報 ===
   if (name === "trigger_briefing") {
-    if (!briefingService.isAvailable()) {
-      return { text: "每日晨報功能未啟用（未設定 BRIEFING_RECIPIENTS）。" };
-    }
+    if (!briefingService.isAvailable()) return { text: "每日晨報功能未啟用（未設定 BRIEFING_RECIPIENTS）。" };
     try {
       await briefingService.triggerBriefing();
       return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };
     } catch (e) {
-      logger.error(`[Tool] trigger_briefing 失敗`, { error: e.message });
       return { text: `晨報推送失敗：${e.message}` };
     }
   }
@@ -401,7 +505,6 @@ async function executeTool(name, input) {
 
 /**
  * 從完整比價結果提取航班資料供 Flex Message 使用
- * 回傳 { outbound, inbound } 兩個陣列
  */
 function extractFlightsForFlex(result) {
   const outbound = [];

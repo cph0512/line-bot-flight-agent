@@ -5,6 +5,11 @@ const config = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
   },
+  // AI 模型（支援 Gemini 或 Anthropic）
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,
     model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
@@ -97,10 +102,12 @@ function isPlaceholder(val) {
 }
 
 function validateConfig() {
+  // AI API Key：Gemini 或 Anthropic 至少要有一個
+  const hasAiKey = config.gemini.apiKey || config.anthropic.apiKey;
   const required = [
     ["LINE_CHANNEL_ACCESS_TOKEN", config.line.channelAccessToken],
     ["LINE_CHANNEL_SECRET", config.line.channelSecret],
-    ["ANTHROPIC_API_KEY", config.anthropic.apiKey],
+    ["GEMINI_API_KEY 或 ANTHROPIC_API_KEY", hasAiKey ? "ok" : null],
   ];
 
   const missing = required.filter(([, v]) => !v || isPlaceholder(v));
@@ -117,9 +124,14 @@ function validateConfig() {
     process.exit(1);
   }
 
-  // 顯示設定狀態
-  console.log(`[Config] ANTHROPIC_API_KEY: ${config.anthropic.apiKey.slice(0, 12)}...`);
-  console.log(`[Config] ANTHROPIC_MODEL: ${config.anthropic.model}`);
+  // 顯示 AI 設定狀態
+  if (config.gemini.apiKey) {
+    console.log(`[Config] AI: Gemini (${config.gemini.model})`);
+    console.log(`[Config] GEMINI_API_KEY: ${config.gemini.apiKey.slice(0, 12)}...`);
+  } else {
+    console.log(`[Config] AI: Anthropic (${config.anthropic.model})`);
+    console.log(`[Config] ANTHROPIC_API_KEY: ${config.anthropic.apiKey.slice(0, 12)}...`);
+  }
   if (config.amadeus.clientId) {
     console.log(`[Config] AMADEUS: ${config.amadeus.production ? "production" : "test"} (已設定)`);
   } else {

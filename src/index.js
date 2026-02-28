@@ -30,7 +30,8 @@ const app = express();
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    name: "LINE 全能家庭 AI 管家 v3",
+    name: "LINE 全能家庭 AI 管家 v4",
+    ai: config.gemini.apiKey ? `Gemini ${config.gemini.model}` : `Anthropic ${config.anthropic.model}`,
     uptime: Math.round(process.uptime()) + "s",
     memory: Math.round(process.memoryUsage().rss / 1024 / 1024) + "MB",
     amadeus: amadeusClient.isAvailable() ? "configured" : "not configured",
@@ -55,29 +56,48 @@ app.get("/health", async (req, res) => {
   // 1. 環境變數
   report.env.LINE_CHANNEL_ACCESS_TOKEN = config.line.channelAccessToken ? "set" : "MISSING";
   report.env.LINE_CHANNEL_SECRET = config.line.channelSecret ? "set" : "MISSING";
-  report.env.ANTHROPIC_API_KEY = config.anthropic.apiKey
-    ? `set (${config.anthropic.apiKey.slice(0, 10)}...)`
-    : "MISSING";
-  report.env.ANTHROPIC_MODEL = config.anthropic.model;
+  // AI 模型設定
+  if (config.gemini.apiKey) {
+    report.env.AI_ENGINE = "Gemini";
+    report.env.GEMINI_MODEL = config.gemini.model;
+  } else {
+    report.env.AI_ENGINE = "Anthropic";
+    report.env.ANTHROPIC_MODEL = config.anthropic.model;
+  }
   report.env.AMADEUS_CLIENT_ID = config.amadeus.clientId ? "set" : "MISSING";
   report.env.AMADEUS_CLIENT_SECRET = config.amadeus.clientSecret ? "set" : "MISSING";
   report.env.AMADEUS_ENV = config.amadeus.production ? "production" : "test";
   report.env.BROWSER_HEADLESS = String(config.browser.headless);
   report.env.BROWSER_MAX_PAGES = config.browser.maxPages;
 
-  // 2. 測試 Anthropic API 是否可用
-  try {
-    const Anthropic = require("@anthropic-ai/sdk").default;
-    const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-    const testRes = await client.messages.create({
-      model: config.anthropic.model,
-      max_tokens: 30,
-      messages: [{ role: "user", content: "reply OK" }],
-    });
-    const text = testRes.content?.[0]?.text || "";
-    report.anthropic = `ok (response="${text.slice(0, 20)}")`;
-  } catch (e) {
-    report.anthropic = `FAIL: ${e.message}`;
+  // 2. 測試 AI API 是否可用
+  if (config.gemini.apiKey) {
+    try {
+      const { GoogleGenAI } = require("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+      const testRes = await ai.models.generateContent({
+        model: config.gemini.model,
+        contents: "reply OK",
+      });
+      const text = testRes.text || "";
+      report.ai = `Gemini ok (response="${text.slice(0, 20)}")`;
+    } catch (e) {
+      report.ai = `Gemini FAIL: ${e.message}`;
+    }
+  } else {
+    try {
+      const Anthropic = require("@anthropic-ai/sdk").default;
+      const client = new Anthropic({ apiKey: config.anthropic.apiKey });
+      const testRes = await client.messages.create({
+        model: config.anthropic.model,
+        max_tokens: 30,
+        messages: [{ role: "user", content: "reply OK" }],
+      });
+      const text = testRes.content?.[0]?.text || "";
+      report.ai = `Anthropic ok (response="${text.slice(0, 20)}")`;
+    } catch (e) {
+      report.ai = `Anthropic FAIL: ${e.message}`;
+    }
   }
 
   // 3. 測試 Amadeus API 是否可用
@@ -195,14 +215,17 @@ app.use((err, req, res, next) => {
 // ========== 啟動 ==========
 app.listen(config.server.port, () => {
   console.log("\n" + "=".repeat(55));
-  console.log("  LINE 全能家庭 AI 管家 v3 已啟動");
+  console.log("  LINE 全能家庭 AI 管家 v4 已啟動");
   console.log("=".repeat(55));
   console.log(`  Server:   http://localhost:${config.server.port}`);
   console.log(`  Webhook:  /webhook`);
   console.log(`  Health:   /health  <-- 啟動後請先訪問此檢查`);
   console.log(`  LIFF:     /liff/   <-- 航班搜尋小程式`);
   console.log(`  API:      /api/flights/search`);
-  console.log(`  AI Model: ${config.anthropic.model}`);
+  const aiLabel = config.gemini.apiKey
+    ? `Gemini ${config.gemini.model}`
+    : `Anthropic ${config.anthropic.model}`;
+  console.log(`  AI Model: ${aiLabel}`);
   console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定" : "❌ 未設定（將使用 RPA）"}`);
   console.log(`  Browser:  Headless=${config.browser.headless}, MaxPages=${config.browser.maxPages}`);
   console.log("  " + "-".repeat(53));
