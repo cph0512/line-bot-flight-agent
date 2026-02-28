@@ -6,7 +6,7 @@
 const tools = [
   {
     name: "search_all_flights",
-    description: "搜尋機票比價。查航班、查機票、找便宜機票、比價時使用。同時查詢多家航空公司。",
+    description: "【備援-請勿主動使用】Amadeus 航班搜尋，僅在 search_google_flights 無法使用時才用。",
     input_schema: {
       type: "object",
       properties: {
@@ -31,7 +31,7 @@ const tools = [
   },
   {
     name: "search_cash_only",
-    description: "只查現金票價，不查里程。比完整搜尋快。",
+    description: "【備援-請勿主動使用】Amadeus 現金票搜尋，僅在 search_google_flights 無法使用時才用。",
     input_schema: {
       type: "object",
       properties: {
@@ -56,7 +56,7 @@ const tools = [
   },
   {
     name: "search_miles_only",
-    description: "只查里程兌換票。用里程換機票時使用。",
+    description: "【備援】查里程兌換票。用里程換機票時使用。Google Flights 不支援里程查詢。",
     input_schema: {
       type: "object",
       properties: {
@@ -191,7 +191,7 @@ const tools = [
   },
   {
     name: "search_google_flights",
-    description: "用 Google Flights 搜尋即時航班票價。搜機票比價時優先使用，資料來自 Google Flights，票價最即時。",
+    description: "【主要工具】搜尋機票比價。查航班、查機票、找便宜機票、比價時一律使用此工具。資料來自 Google Flights，票價最即時準確。",
     input_schema: {
       type: "object",
       properties: {

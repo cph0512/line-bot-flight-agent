@@ -110,7 +110,7 @@ function getSystemPrompt() {
 絕對不可以自己編一個看起來合理的數字。
 
 ## 工具使用規則
-- 機票/航班/比價 → 優先用 search_google_flights（Google Flights 即時票價），查不到再用 search_all_flights（Amadeus）
+- ✈️ 機票/航班/比價 → 一律用 search_google_flights（Google Flights 即時票價）。禁止使用 search_all_flights / search_cash_only / search_miles_only。
 - 不確定機場代碼 → search_airport（用城市名找代碼）
 - 找最便宜日期/彈性日期 → get_flight_prices（價格日曆）
 - 天氣/溫度/下雨 → get_weather
@@ -136,7 +136,7 @@ function getSystemPrompt() {
 📊 其他：
 2️⃣ 航空 航班號 | 時間 | NT$票價
 
-⚠️ 票價來自 Google Flights / Amadeus，僅供參考，實際價格請以航空公司官網為準。
+⚠️ 票價來自 Google Flights，僅供參考，實際價格請以航空公司官網為準。
 
 每次航班回覆最後都必須加上這行提醒。
 
