@@ -33,7 +33,25 @@ const SCRAPERS = {
 };
 
 const queue = new PQueue({ concurrency: config.browser.maxPages });
-const PER_AIRLINE_TIMEOUT = 40000;
+const PER_AIRLINE_TIMEOUT = 25000; // 從 40 秒降到 25 秒
+
+/**
+ * 檢查是否有任何里程帳號設定
+ */
+function hasAnyMileageCredentials(airlines = []) {
+  const accounts = config.mileageAccounts || {};
+  const targets = airlines.length > 0 ? airlines : Object.keys(accounts);
+  return targets.some((code) => accounts[code]?.id && accounts[code]?.password);
+}
+
+/**
+ * 取得有設定里程帳號的航空公司
+ */
+function getAirlinesWithMileageCredentials(airlines = []) {
+  const accounts = config.mileageAccounts || {};
+  const targets = airlines.length > 0 ? airlines : Object.keys(accounts);
+  return targets.filter((code) => accounts[code]?.id && accounts[code]?.password);
+}
 
 function withTimeout(promise, ms, label) {
   return new Promise((resolve, reject) => {
@@ -80,9 +98,25 @@ async function searchCashFlights(params, airlines = []) {
     }
   }
 
-  // 策略 2：RPA Stealth 爬蟲（備援）
+  // 策略 2：RPA Stealth 爬蟲（備援）— 但用更短的超時
   logger.info("[Engine] 改用 RPA Stealth 爬蟲...");
-  return searchCashFlightsRPA(params, airlines);
+  try {
+    return await withTimeout(
+      searchCashFlightsRPA(params, airlines),
+      35000,
+      "RPA 爬蟲總計"
+    );
+  } catch (rpaErr) {
+    logger.error(`[Engine] RPA 也失敗: ${rpaErr.message}`);
+    return {
+      success: false,
+      type: "cash",
+      flights: [],
+      totalResults: 0,
+      queriedAirlines: [],
+      errors: [{ airline: "全部", code: "ALL", error: `Amadeus+RPA 都失敗` }],
+    };
+  }
 }
 
 /**
@@ -119,12 +153,26 @@ async function searchCashFlightsRPA(params, airlines = []) {
 }
 
 /**
- * 搜尋里程票
+ * 搜尋里程票（只查有設定帳號的航空公司）
  */
 async function searchMilesFlights(params, airlines = []) {
-  const targetAirlines = airlines.length > 0
-    ? airlines.filter((code) => SCRAPERS[code])
-    : Object.keys(SCRAPERS);
+  // 只查有設定里程帳號的航空公司 — 沒帳號的不浪費時間
+  const targetAirlines = getAirlinesWithMileageCredentials(airlines)
+    .filter((code) => SCRAPERS[code]);
+
+  if (targetAirlines.length === 0) {
+    logger.info("[Engine] 沒有設定任何里程帳號，跳過里程搜尋");
+    return {
+      success: false,
+      type: "miles",
+      flights: [],
+      totalResults: 0,
+      queriedAirlines: [],
+      errors: [{ airline: "全部", code: "ALL", error: "未設定里程帳號" }],
+    };
+  }
+
+  logger.info(`[Engine] 搜尋里程票，有帳號的航空公司: [${targetAirlines.join(",")}]`);
 
   const results = await Promise.allSettled(
     targetAirlines.map((code) =>
@@ -140,16 +188,38 @@ async function searchMilesFlights(params, airlines = []) {
 
 /**
  * 完整比價（現金 + 里程）
+ * 策略：先查現金（Amadeus 快速），有里程帳號才查里程
  */
 async function searchAll(params, airlines = []) {
   logger.info("[Engine] === 開始完整比價 ===");
 
-  const [cashResults, milesResults] = await Promise.all([
-    searchCashFlights(params, airlines),
-    searchMilesFlights(params, airlines),
-  ]);
+  // 先確認是否需要查里程
+  const hasMilesCredentials = hasAnyMileageCredentials(airlines);
 
-  logger.info(`[Engine] === 比價完成 === cash=${cashResults.flights.length}筆(${cashResults.source || "rpa"}) miles=${milesResults.flights.length}筆`);
+  let cashResults, milesResults;
+
+  if (hasMilesCredentials) {
+    // 有里程帳號：並行查詢現金+里程
+    logger.info("[Engine] 有里程帳號，現金+里程並行查詢");
+    [cashResults, milesResults] = await Promise.all([
+      searchCashFlights(params, airlines),
+      searchMilesFlights(params, airlines),
+    ]);
+  } else {
+    // 沒有里程帳號：只查現金（超快！）
+    logger.info("[Engine] 無里程帳號，只查現金票（Amadeus）");
+    cashResults = await searchCashFlights(params, airlines);
+    milesResults = {
+      success: false,
+      type: "miles",
+      flights: [],
+      totalResults: 0,
+      queriedAirlines: [],
+      errors: [{ airline: "全部", code: "ALL", error: "未設定里程帳號" }],
+    };
+  }
+
+  logger.info(`[Engine] === 比價完成 === cash=${cashResults.flights?.length || 0}筆(${cashResults.source || "rpa"}) miles=${milesResults.flights?.length || 0}筆`);
 
   const cheapestCash = cashResults.flights[0]?.price || 0;
   const milesWithValue = milesResults.flights.map((mf) => {
