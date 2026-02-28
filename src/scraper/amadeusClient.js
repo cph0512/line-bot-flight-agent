@@ -72,7 +72,7 @@ function withTimeout(promise, ms, label) {
   });
 }
 
-const AMADEUS_TIMEOUT = 15000; // 15 秒超時
+const AMADEUS_TIMEOUT = 10000; // 10 秒超時（成功通常 1-3 秒，失敗立即回傳）
 
 /**
  * 搜尋航班（現金票）

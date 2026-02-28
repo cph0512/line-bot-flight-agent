@@ -32,8 +32,12 @@ const SCRAPERS = {
   SQ: singaporeAirlines,
 };
 
+// 台灣出發最常用的航空公司（RPA 備援時優先查這些）
+const PRIORITY_AIRLINES = ["CI", "BR", "JX"];
+
 const queue = new PQueue({ concurrency: config.browser.maxPages });
-const PER_AIRLINE_TIMEOUT = 25000; // 從 40 秒降到 25 秒
+const PER_AIRLINE_TIMEOUT = 20000; // 每家航空 20 秒
+const RPA_TOTAL_TIMEOUT = 30000;   // RPA 總計 30 秒
 
 /**
  * 檢查是否有任何里程帳號設定
@@ -62,6 +66,24 @@ function withTimeout(promise, ms, label) {
   });
 }
 
+/**
+ * 去重航班（相同航班號+出發時間只保留一筆，保留最便宜的）
+ */
+function deduplicateFlights(flights) {
+  const seen = new Map();
+  for (const f of flights) {
+    const key = `${f.flightNumber}|${f.departTime}`;
+    const existing = seen.get(key);
+    if (!existing || (f.price && (!existing.price || f.price < existing.price))) {
+      seen.set(key, f);
+    }
+  }
+  const deduped = [...seen.values()];
+  deduped.sort((a, b) => (a.price || 0) - (b.price || 0));
+  deduped.forEach((f, i) => (f.rank = i + 1));
+  return deduped;
+}
+
 // =============================================
 // 主要搜尋函式（雙軌策略）
 // =============================================
@@ -79,15 +101,20 @@ async function searchCashFlights(params, airlines = []) {
       const apiResult = await amadeusClient.searchFlights(params, airlines);
 
       if (apiResult.success && apiResult.flights.length > 0) {
-        const outbound = apiResult.flights.filter((f) => f.direction === "outbound");
-        const inbound = apiResult.flights.filter((f) => f.direction === "inbound");
-        logger.info(`[Engine] Amadeus 成功：去程=${outbound.length} 回程=${inbound.length}`);
+        const outboundRaw = apiResult.flights.filter((f) => f.direction === "outbound");
+        const inboundRaw = apiResult.flights.filter((f) => f.direction === "inbound");
+
+        // 去重（Amadeus 會為每個去回程組合產生一筆，同一航班會重複）
+        const outbound = deduplicateFlights(outboundRaw);
+        const inbound = deduplicateFlights(inboundRaw);
+
+        logger.info(`[Engine] Amadeus 成功：去程=${outbound.length}(原${outboundRaw.length}) 回程=${inbound.length}(原${inboundRaw.length})`);
         return {
           success: true,
           type: "cash",
           flights: outbound.length > 0 ? outbound : apiResult.flights,
           inboundFlights: inbound,
-          totalResults: apiResult.flights.length,
+          totalResults: outbound.length + inbound.length,
           queriedAirlines: [...new Set(apiResult.flights.map((f) => f.airlineName))],
           source: "amadeus",
         };
@@ -99,12 +126,15 @@ async function searchCashFlights(params, airlines = []) {
     }
   }
 
-  // 策略 2：RPA Stealth 爬蟲（備援）— 但用更短的超時
-  logger.info("[Engine] 改用 RPA Stealth 爬蟲...");
+  // 策略 2：RPA Stealth 爬蟲（備援）
+  // 如果沒指定航空公司，只查最常用的 3 家（避免全部 7 家太慢超時）
+  const rpaAirlines = airlines.length > 0 ? airlines : PRIORITY_AIRLINES;
+  logger.info(`[Engine] 改用 RPA 爬蟲 (${rpaAirlines.join(",")})...`);
+
   try {
     return await withTimeout(
-      searchCashFlightsRPA(params, airlines),
-      35000,
+      searchCashFlightsRPA(params, rpaAirlines),
+      RPA_TOTAL_TIMEOUT,
       "RPA 爬蟲總計"
     );
   } catch (rpaErr) {
@@ -113,6 +143,7 @@ async function searchCashFlights(params, airlines = []) {
       success: false,
       type: "cash",
       flights: [],
+      inboundFlights: [],
       totalResults: 0,
       queriedAirlines: [],
       errors: [{ airline: "全部", code: "ALL", error: `Amadeus+RPA 都失敗` }],

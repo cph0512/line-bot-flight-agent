@@ -131,9 +131,9 @@ async function runAgentLoop(history) {
   let lastFlights = null;
   let lastInboundFlights = null;
 
-  // 整體超時保護：50 秒
+  // 整體超時保護：55 秒（LINE replyToken 有效 60 秒）
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("AI 處理超時（50 秒）")), 50000)
+    setTimeout(() => reject(new Error("AI 處理超時（55 秒）")), 55000)
   );
 
   const agentWork = async () => {
