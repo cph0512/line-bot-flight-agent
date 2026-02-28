@@ -217,7 +217,7 @@ async function fetchGoogleNews(cat, num, catName, isWorld = false) {
     text += `   來源: ${article.source}`;
     if (article.date) text += ` | ${article.date}`;
     text += "\n";
-    if (article.link) text += `   🔗 ${article.link}\n`;
+    // 不顯示連結（太長影響閱讀）
   });
 
   return { text };

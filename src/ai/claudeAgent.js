@@ -1,13 +1,11 @@
 // =============================================
-// AI Agent（全能管家版 v4 — Gemini 版）
+// AI Agent（全能管家版 v5 — Gemini 優化版）
 //
-// 核心流程：
-// 1. 接收使用者自然語言
-// 2. Gemini 理解意圖，自動選擇工具
-// 3. 執行工具：航班查詢/天氣/新聞/行事曆/晨報
-// 4. 分析結果，給出建議
-//
-// 支援 Gemini（預設）或 Anthropic（fallback）
+// 核心改進：
+// - 精簡 system prompt（Gemini 偏好短指令）
+// - 明確 toolConfig 確保 function calling 啟用
+// - Schema 轉換支援 INTEGER 型別
+// - 加強 debug logging
 // =============================================
 
 const { GoogleGenAI } = require("@google/genai");
@@ -30,38 +28,39 @@ let anthropic = null;
 
 if (useGemini) {
   genAI = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+  logger.info("[AI] 使用 Gemini 引擎");
 } else {
   const Anthropic = require("@anthropic-ai/sdk").default;
   anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+  logger.info("[AI] 使用 Anthropic 引擎");
 }
 
 // ========== 工具定義轉換（Anthropic → Gemini）==========
-function convertToolsToGemini(tools) {
-  return [{
-    functionDeclarations: tools.map((t) => {
-      const decl = {
-        name: t.name,
-        description: t.description,
-      };
-      // 只在有實際 properties 時才加 parameters（空的會讓 Gemini 出錯）
-      const schema = t.input_schema;
-      if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
-        decl.parameters = convertSchema(schema);
-      }
-      return decl;
-    }),
-  }];
+
+/**
+ * 轉換 Schema type 為 Gemini 格式
+ * Gemini 支援：STRING, NUMBER, INTEGER, BOOLEAN, ARRAY, OBJECT
+ */
+function toGeminiType(type) {
+  if (!type) return "STRING";
+  const t = type.toUpperCase();
+  // 確保是 Gemini 支援的型別
+  const valid = ["STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT"];
+  return valid.includes(t) ? t : "STRING";
 }
 
 function convertSchema(schema) {
   if (!schema) return undefined;
   const result = {};
 
-  // 型別轉大寫（Gemini 格式）
-  if (schema.type) result.type = schema.type.toUpperCase();
+  result.type = toGeminiType(schema.type);
   if (schema.description) result.description = schema.description;
   if (schema.enum) result.enum = schema.enum;
-  if (schema.required) result.required = schema.required;
+
+  // required 必須是陣列
+  if (Array.isArray(schema.required)) {
+    result.required = schema.required;
+  }
 
   // 遞迴轉換 properties
   if (schema.properties && Object.keys(schema.properties).length > 0) {
@@ -81,146 +80,85 @@ function convertSchema(schema) {
   return result;
 }
 
+function convertToolsToGemini(tools) {
+  const declarations = [];
+
+  for (const t of tools) {
+    const decl = {
+      name: t.name,
+      description: t.description,
+    };
+
+    const schema = t.input_schema;
+    if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
+      decl.parameters = convertSchema(schema);
+    }
+
+    declarations.push(decl);
+  }
+
+  logger.info(`[AI] 轉換工具定義: ${declarations.map(d => d.name).join(", ")} (共 ${declarations.length} 個)`);
+
+  return [{ functionDeclarations: declarations }];
+}
+
 const geminiTools = convertToolsToGemini(anthropicTools);
 
 /**
- * 動態生成系統提示（包含當天日期）
+ * 動態生成系統提示（Gemini 優化：精簡版）
  */
 function getSystemPrompt() {
   const today = new Date().toISOString().slice(0, 10);
   const year = new Date().getFullYear();
 
-  return `你是一個 LINE 全能家庭 AI 管家。你可以處理航班查詢、天氣預報、新聞、行事曆管理和每日晨報。
+  return `你是 LINE 全能家庭 AI 管家。用繁體中文回覆，語氣親切，善用 emoji，回覆簡潔適合手機閱讀。
+今天：${today}。日期沒年份預設 ${year} 年，已過就用 ${year + 1} 年。
 
-## 今天的日期：${today}
-使用者提到的日期如果沒有指定年份，預設使用 ${year} 年。
-例如：「3/26」→「${year}-03-26」，「4/2」→「${year}-04-02」。
-如果該日期已過去，則用 ${year + 1} 年。
+重要：你只能使用工具回傳的資料，絕對不可編造任何資訊。
 
-## 一般回覆規則
-- 用繁體中文，語氣親切，善用 emoji
-- 回覆簡潔，適合手機閱讀
-- 你「只能」使用工具回傳的真實資料。不可以自己編造任何資訊。
+## 工具使用規則
+- 使用者問機票/航班/比價 → 呼叫 search_all_flights（預設出發 TPE）
+- 使用者問天氣/溫度/下雨 → 呼叫 get_weather
+- 使用者問新聞（台灣/國際/科技/財經等）→ 呼叫 get_news
+- 使用者問行程/行事曆 → 呼叫 get_events
+- 使用者說早報/晨報/今日摘要/每日簡報 → 呼叫 trigger_briefing
+- 使用者說加行程/新增會議 → 呼叫 add_event
+- 使用者說改行程/更新 → 先 get_events 再 update_event
+- 使用者說刪行程/取消 → 先 get_events 再 delete_event
 
----
-## ✈️ 機票查詢
+## 航班回覆格式
+系統自動產生 Flex 卡片，你的文字只做分析摘要。不要用 markdown 表格。格式：
 
-### 最重要的規則（絕對不可違反）
-1. 收到航班查詢請求時，你「必須立刻」呼叫 search_all_flights 或 search_cash_only 工具。
-2. 「絕對不可以」跳過搜尋直接呼叫 get_booking_links。get_booking_links 只能在搜尋失敗後才使用。
-3. 絕對禁止輸出：自行編造的價格、預估價格、機型、飛行時間、航班號碼。
+✈️ 出發地 → 目的地
+📅 日期 | 艙等
 
-### 工具使用順序
-步驟 1：收到航班查詢 → 立刻呼叫 search_all_flights（帶入正確的年份！）
-步驟 2：收到結果 → 整理成表格格式回覆
-步驟 3：只有在步驟 1 完全失敗時 → 才呼叫 get_booking_links
+🏆 推薦：航空 航班號
+  └ 出發→抵達 | 直飛/轉機 | 飛行時間
+  └ 💰 NT$票價
+  └ ✅ 推薦原因
 
-### 回覆格式（收到航班資料後）
-系統會自動產生漂亮的 Flex 卡片顯示航班表格，你的文字訊息只需要做「分析摘要」，不要重複列表格。
-絕對不要用 markdown 表格（| --- | 格式），LINE 不支援 markdown。
+📊 其他：
+2️⃣ 航空 航班號 | 時間 | NT$票價
+3️⃣ 航空 航班號 | 時間 | NT$票價
 
-格式如下：
+## 新聞回覆格式
+不要附連結URL。格式：
 
-✈️ {出發地} → {目的地}
-📅 {去程日期}～{回程日期} | {艙等}
+📰 地區分類新聞
 
-🏆 推薦：{航空} {航班號}
-  └ {出發時間}→{抵達時間} | {直飛/轉N次} | {飛行時間}
-  └ 💰 NT$來回票價 來回
-  └ ✅ {推薦原因：最便宜/最快/直飛等}
+1️⃣ 標題
+📍來源
 
-📊 其他選項：
-2️⃣ {航空} {航班號} | {時間} | NT$票價
-3️⃣ {航空} {航班號} | {時間} | NT$票價
+2️⃣ 標題
+📍來源
 
-⚠️ 以上為來回總價（含去回程）
+⭐ 一句焦點總結
 
-規則：
-- 不要用 markdown 表格，用簡潔的條列式
-- 推薦最佳選擇放最上面，用 🏆 標記
-- 其他選項簡短一行帶過即可
-- 票價為「來回總價」，不要寫成單程價
+## 航空代碼
+CI=華航 BR=長榮 JX=星宇 EK=阿聯酋 TK=土航 CX=國泰 SQ=新航
 
-- 從對話提取：出發地（預設 TPE）、目的地、日期、人數、艙等
-- 資訊不足時友善詢問（至少需要目的地和日期）
-
-### 查詢失敗時
-「抱歉，查詢失敗。以下是各航空公司訂票連結：」然後呼叫 get_booking_links。
-不可以額外補充任何你自己知道的航班資訊。
-
-### 里程價值判斷
-- 每哩 > NT$0.4 = 划算
-- 每哩 > NT$0.6 = 非常划算
-- 每哩 < NT$0.3 = 不划算
-
-### 航空公司代碼
-CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
-
-### 城市代碼
-台北:TPE 高雄:KHH 東京(成田):NRT 東京(羽田):HND 大阪:KIX
-名古屋:NGO 福岡:FUK 札幌:CTS 沖繩:OKA
-首爾:ICN 釜山:PUS 曼谷:BKK 新加坡:SIN
-香港:HKG 上海:PVG 倫敦:LHR 巴黎:CDG
-紐約:JFK 洛杉磯:LAX 杜拜:DXB 伊斯坦堡:IST
-吉隆坡:KUL 雪梨:SYD 墨爾本:MEL
-
----
-## 🌤️ 天氣查詢（全球）
-- 使用 get_weather 工具查詢全球天氣
-- 台灣城市（台北、新北等）→ CWA 氣象署（更精確）
-- 國際城市（Tokyo、London 等）→ Open-Meteo（免費全球覆蓋）
-- days=1 查今天，days=2~7 查多天預報
-- 包含降雨機率、溫度、穿衣/帶傘建議
-- 支援中英文城市名
-
----
-## 📰 新聞查詢（台灣+國際）
-- 使用 get_news 工具取得即時新聞
-- region="tw"（預設）台灣新聞，region="world" 國際新聞
-- 使用者說「國際新聞」「世界新聞」→ region="world"
-- 分類：general(綜合), business(財經), technology(科技), sports(體育), entertainment(娛樂), health(健康), science(科學)
-- 預設 7 筆，最多 10 筆
-
-### 新聞回覆格式（嚴格遵守）
-收到新聞資料後，用以下格式回覆，不可自行重新分類或分組：
-
-📰 {地區}{分類}新聞（{日期}）
-
-1️⃣ {新聞標題}
-📍{來源}
-
-2️⃣ {新聞標題}
-📍{來源}
-
-3️⃣ ...（依序列出全部新聞）
-
-⭐ {一句簡短今日焦點總結}
-
-規則：
-- 每則新聞用數字 emoji（1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣）編號
-- 「不可」自行歸納分類（例如不要分成「職棒相關」「經典賽相關」等子類別）
-- 「不可」用 bullet point（•）列表
-- 「不要」附上連結 URL（太長影響閱讀）
-- 每則標題獨立一行，來源在下一行
-- 最後一行用 ⭐ 加一句簡短的今日焦點總結
-
----
-## 📅 行事曆管理
-- get_events：查詢行程（可指定日期範圍，空=今天）
-- add_event：新增行程（自動偵測時間衝突）
-- update_event：更新行程（需先用 get_events 取得 eventId）
-- delete_event：刪除行程（需先用 get_events 取得 eventId）
-- calendarName 空白=個人行事曆，「全家」=全部家人行事曆
-- 全天事件用 YYYY-MM-DD 格式，有時間的用 YYYY-MM-DDTHH:mm:ss
-
----
-## ☀️ 每日晨報
-- 使用者說「早報」「晨報」「今日摘要」「每日簡報」「晨報 測試」→ 呼叫 trigger_briefing
-- 整合多城市天氣 + 今日行程 + 多區域新聞一次推送
-- 系統已設定每日自動定時推送（透過 MORNING_BRIEFING_TIME 排程）
-- 支援多城市天氣（透過 BRIEFING_CITIES 設定）
-- 支援多區域/分類新聞（透過 BRIEFING_NEWS 設定）
-- 使用者問「可以自動早報嗎？」→ 回答：已有自動排程功能，需在 Railway 環境變數設定 BRIEFING_RECIPIENTS（LINE userId）和 MORNING_BRIEFING_TIME`;
+## 城市代碼
+台北:TPE 東京:NRT 大阪:KIX 首爾:ICN 曼谷:BKK 新加坡:SIN 香港:HKG 倫敦:LHR 紐約:JFK 洛杉磯:LAX`;
 }
 
 // 對話記錄
@@ -253,7 +191,7 @@ async function handleMessage(userId, userMessage) {
 }
 
 // ================================================================
-// Gemini Agent Loop（使用 generateContent API）
+// Gemini Agent Loop
 // ================================================================
 async function runGeminiLoop(history) {
   let iterations = 5;
@@ -271,12 +209,18 @@ async function runGeminiLoop(history) {
       parts: [{ text: msg.content }],
     }));
 
+    // Gemini 設定：明確啟用 function calling
     const geminiConfig = {
       systemInstruction: getSystemPrompt(),
       tools: geminiTools,
+      toolConfig: {
+        functionCallingConfig: {
+          mode: "AUTO",
+        },
+      },
     };
 
-    logger.info(`[AI] 呼叫 Gemini API (${config.gemini.model})... contents=${contents.length}`);
+    logger.info(`[AI] Gemini API (${config.gemini.model}) contents=${contents.length} tools=${geminiTools[0].functionDeclarations.length}`);
 
     while (iterations-- > 0) {
       let response;
@@ -287,17 +231,17 @@ async function runGeminiLoop(history) {
           config: geminiConfig,
         });
       } catch (e) {
-        logger.error(`[AI] Gemini API 錯誤: ${e.message}`);
+        logger.error(`[AI] Gemini API 錯誤: ${e.message}`, { stack: e.stack });
         return { text: `AI 呼叫失敗：${e.message}` };
       }
 
-      // 檢查是否有 function call
+      // 檢查 function calls
       const functionCalls = response.functionCalls || [];
+      logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text}`);
 
       if (functionCalls.length === 0) {
-        // 純文字回覆
-        const text = response.text || "可以再說清楚一點嗎？";
-        logger.info(`[AI] Gemini 純文字回覆 textLen=${text.length}`);
+        const text = response.text || "抱歉，我不太理解。試試看：「台灣新聞」「台北天氣」「晨報」";
+        logger.info(`[AI] 純文字回覆: "${text.slice(0, 80)}..."`);
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
@@ -310,13 +254,13 @@ async function runGeminiLoop(history) {
       const functionResponseParts = [];
 
       for (const fc of functionCalls) {
-        logger.info(`[AI] >>> 呼叫工具: ${fc.name}`, { input: JSON.stringify(fc.args) });
+        logger.info(`[AI] >>> 呼叫工具: ${fc.name}`, { args: JSON.stringify(fc.args) });
 
         const startTime = Date.now();
         const result = await executeTool(fc.name, fc.args || {});
         const elapsed = Date.now() - startTime;
 
-        logger.info(`[AI] <<< 工具完成: ${fc.name} (${elapsed}ms) flightsFound=${result.flights?.length || 0}`);
+        logger.info(`[AI] <<< 工具完成: ${fc.name} (${elapsed}ms) textLen=${result.text?.length || 0}`);
 
         if (result.flights && result.flights.length > 0) {
           lastFlights = result.flights;
@@ -414,7 +358,7 @@ async function runAnthropicLoop(history) {
 }
 
 // ================================================================
-// 執行工具（共用，不分 AI 引擎）
+// 執行工具（共用）
 // ================================================================
 async function executeTool(name, input) {
   logger.info(`[Tool] ${name}`, { input: JSON.stringify(input) });
@@ -432,7 +376,7 @@ async function executeTool(name, input) {
     };
     const airlines = input.airlines || [];
 
-    logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate} cabin=${params.cabinClass || "ALL"} airlines=[${airlines.join(",")}]`);
+    logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate}`);
 
     switch (name) {
       case "search_all_flights": {
@@ -443,7 +387,7 @@ async function executeTool(name, input) {
           logger.info(`[Tool] search_all 完成: 去程=${outbound.length} 回程=${inbound.length}`);
           return { text, flights: outbound, inboundFlights: inbound };
         } catch (e) {
-          logger.error(`[Tool] search_all 失敗`, { error: e.message, stack: e.stack });
+          logger.error(`[Tool] search_all 失敗`, { error: e.message });
           return { text: `搜尋失敗：${e.message}` };
         }
       }
