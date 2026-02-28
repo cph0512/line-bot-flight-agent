@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>✈️ 航班比價搜尋</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {
+      --primary: #1a73e8;
+      --primary-light: #e8f0fe;
+      --danger: #d93025;
+      --success: #188038;
+      --warning: #f29900;
+      --bg: #f0f2f5;
+      --card: #ffffff;
+      --text: #1f1f1f;
+      --text-secondary: #5f6368;
+      --border: #dadce0;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-lg: 0 4px 14px rgba(0,0,0,0.1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+      color: white;
+      padding: 20px 16px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header .subtitle { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+
+    /* Search Form */
+    .search-section {
+      background: var(--card);
+      margin: 12px;
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-group input, .form-group select {
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 15px;
+      color: var(--text);
+      background: #fafafa;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+    }
+    .form-group input:focus, .form-group select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+      background: white;
+    }
+
+    /* Airline Chips */
+    .airline-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .airline-chip {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: white;
+      color: var(--text-secondary);
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .airline-chip.active {
+      border-color: var(--primary);
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .airline-chip:active { transform: scale(0.95); }
+
+    /* Search Button */
+    .btn-search {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-search:active { transform: scale(0.98); }
+    .btn-search:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .btn-search .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Sort Bar */
+    .sort-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      overflow-x: auto;
+    }
+    .sort-btn {
+      padding: 5px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: white;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .sort-btn.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    /* Results */
+    .results-section { padding: 0 12px 100px; }
+    .results-count {
+      font-size: 13px;
+      color: var(--text-secondary);
+      padding: 8px 4px;
+    }
+    .results-count strong { color: var(--primary); }
+
+    /* Flight Card */
+    .flight-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .flight-card:active { box-shadow: var(--shadow-lg); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 0;
+    }
+    .airline-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .airline-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .flight-number {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 400;
+    }
+    .cabin-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #f0f0f0;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .card-body { padding: 10px 14px; }
+
+    .time-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .time-block { text-align: center; }
+    .time-block .time {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .time-block .airport {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .route-line {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    .route-line .duration {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+    .route-line .line {
+      width: 100%;
+      height: 2px;
+      background: var(--border);
+      position: relative;
+    }
+    .route-line .line::after {
+      content: '';
+      position: absolute;
+      right: -1px; top: -3px;
+      border: 4px solid transparent;
+      border-left-color: var(--border);
+    }
+    .route-line .stops-label {
+      font-size: 11px;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+    .stops-direct { color: var(--success); }
+    .stops-transfer { color: var(--warning); }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px 12px;
+      border-top: 1px solid #f0f0f0;
+    }
+    .price {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--danger);
+    }
+    .price .currency {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .aircraft-info {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .btn-book {
+      padding: 8px 18px;
+      border-radius: 8px;
+      border: none;
+      background: var(--primary);
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .btn-book:active { opacity: 0.85; }
+
+    /* Status Messages */
+    .status-message {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+    .status-message .icon { font-size: 48px; margin-bottom: 12px; }
+    .status-message .title { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: var(--text); }
+    .status-message .desc { font-size: 14px; line-height: 1.6; }
+
+    /* Loading Skeleton */
+    .skeleton-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+    .skeleton-line {
+      height: 14px;
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    .skeleton-line.w60 { width: 60%; }
+    .skeleton-line.w40 { width: 40%; }
+    .skeleton-line.w80 { width: 80%; }
+    .skeleton-line.h24 { height: 24px; }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* Swap button */
+    .swap-btn {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 1.5px solid var(--border);
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      align-self: flex-end;
+      margin-bottom: 8px;
+      transition: background 0.2s;
+    }
+    .swap-btn:active { background: var(--primary-light); }
+
+    .form-row-3 {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    /* Responsive */
+    @media (min-width: 480px) {
+      .search-section { margin: 16px auto; max-width: 520px; }
+      .results-section { max-width: 520px; margin: 0 auto; padding-bottom: 40px; }
+      .sort-bar { max-width: 520px; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>✈️ 航班比價搜尋</h1>
+  <div class="subtitle">Amadeus 全球航空訂位系統 即時查詢</div>
+</div>
+
+<!-- Search Form -->
+<div class="search-section">
+  <div class="form-row-3">
+    <div class="form-group">
+      <label>出發地</label>
+      <input type="text" id="origin" placeholder="TPE" maxlength="3" value="TPE">
+    </div>
+    <button class="swap-btn" onclick="swapCities()" title="交換">⇄</button>
+    <div class="form-group">
+      <label>目的地</label>
+      <input type="text" id="destination" placeholder="NRT" maxlength="3">
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label>去程日期</label>
+      <input type="date" id="departDate">
+    </div>
+    <div class="form-group">
+      <label>回程日期</label>
+      <input type="date" id="returnDate">
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label>艙等</label>
+      <select id="cabinClass">
+        <option value="">全部艙等</option>
+        <option value="ECONOMY">經濟艙</option>
+        <option value="PREMIUM_ECONOMY">豪華經濟艙</option>
+        <option value="BUSINESS">商務艙</option>
+        <option value="FIRST">頭等艙</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>人數</label>
+      <select id="adults">
+        <option value="1">1 位成人</option>
+        <option value="2">2 位成人</option>
+        <option value="3">3 位成人</option>
+        <option value="4">4 位成人</option>
+      </select>
+    </div>
+  </div>
+
+  <label style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;display:block;text-transform:uppercase;letter-spacing:0.5px;">航空公司</label>
+  <div class="airline-chips" id="airlineChips">
+    <div class="airline-chip active" data-code="CI" style="--c:#D7177E" onclick="toggleChip(this)">🇹🇼 華航</div>
+    <div class="airline-chip active" data-code="BR" style="--c:#00694A" onclick="toggleChip(this)">🇹🇼 長榮</div>
+    <div class="airline-chip active" data-code="JX" style="--c:#8B6914" onclick="toggleChip(this)">🇹🇼 星宇</div>
+    <div class="airline-chip" data-code="EK" style="--c:#D71921" onclick="toggleChip(this)">🇦🇪 阿聯酋</div>
+    <div class="airline-chip" data-code="TK" style="--c:#C80815" onclick="toggleChip(this)">🇹🇷 土航</div>
+    <div class="airline-chip" data-code="CX" style="--c:#006564" onclick="toggleChip(this)">🇭🇰 國泰</div>
+    <div class="airline-chip" data-code="SQ" style="--c:#F2A900" onclick="toggleChip(this)">🇸🇬 新航</div>
+  </div>
+
+  <button class="btn-search" id="searchBtn" onclick="doSearch()">
+    <span id="searchBtnText">🔍 搜尋航班</span>
+  </button>
+</div>
+
+<!-- Sort Bar -->
+<div class="sort-bar" id="sortBar" style="display:none;">
+  <span>排序：</span>
+  <button class="sort-btn active" data-sort="price" onclick="sortResults(this,'price')">💰 價格</button>
+  <button class="sort-btn" data-sort="depart" onclick="sortResults(this,'depart')">🕐 出發時間</button>
+  <button class="sort-btn" data-sort="duration" onclick="sortResults(this,'duration')">⏱ 飛行時間</button>
+  <button class="sort-btn" data-sort="stops" onclick="sortResults(this,'stops')">🔄 轉機次數</button>
+</div>
+
+<!-- Results -->
+<div class="results-section" id="results"></div>
+
+<script>
+// =============================================
+// 資料與狀態
+// =============================================
+const AIRLINE_COLORS = {
+  CI: '#D7177E', BR: '#00694A', JX: '#8B6914',
+  EK: '#D71921', TK: '#C80815', CX: '#006564', SQ: '#F2A900'
+};
+const AIRLINE_NAMES = {
+  CI: '華航', BR: '長榮', JX: '星宇',
+  EK: '阿聯酋', TK: '土航', CX: '國泰', SQ: '新航'
+};
+const CABIN_NAMES = {
+  ECONOMY: '經濟艙', PREMIUM_ECONOMY: '豪華經濟艙',
+  BUSINESS: '商務艙', FIRST: '頭等艙'
+};
+const AIRCRAFT_NAMES = {
+  '359': 'A350-900', '35K': 'A350-900', '351': 'A350-1000',
+  '789': 'B787-9', '78J': 'B787-9', '788': 'B787-8',
+  '77W': 'B777-300ER', '773': 'B777-300', '772': 'B777-200',
+  '333': 'A330-300', '332': 'A330-200', '339': 'A330-900neo',
+  '321': 'A321', '320': 'A320', '738': 'B737-800',
+  '388': 'A380-800', '744': 'B747-400',
+};
+
+let currentFlights = [];
+let currentSort = 'price';
+
+// =============================================
+// LIFF 初始化 + URL 參數解析
+// =============================================
+(async function init() {
+  // 從 URL 讀取搜尋參數（LINE Bot 會帶參數過來）
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('origin')) document.getElementById('origin').value = params.get('origin');
+  if (params.get('destination')) document.getElementById('destination').value = params.get('destination');
+  if (params.get('departDate')) document.getElementById('departDate').value = params.get('departDate');
+  if (params.get('returnDate')) document.getElementById('returnDate').value = params.get('returnDate');
+  if (params.get('cabinClass')) document.getElementById('cabinClass').value = params.get('cabinClass');
+  if (params.get('adults')) document.getElementById('adults').value = params.get('adults');
+
+  // 設定航空公司 chips
+  if (params.get('airlines')) {
+    const codes = params.get('airlines').split(',');
+    document.querySelectorAll('.airline-chip').forEach(chip => {
+      chip.classList.toggle('active', codes.includes(chip.dataset.code));
+    });
+  }
+
+  // 設定預設日期（如果沒有從 URL 帶入）
+  if (!document.getElementById('departDate').value) {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    document.getElementById('departDate').value = d.toISOString().slice(0, 10);
+  }
+
+  // 嘗試初始化 LIFF（可選）
+  try {
+    const liffId = getLiffId();
+    if (liffId && window.liff) {
+      await liff.init({ liffId });
+      console.log('LIFF initialized');
+    }
+  } catch (e) {
+    console.log('LIFF init skipped:', e.message);
+  }
+
+  // 如果有完整參數，自動搜尋
+  if (params.get('origin') && params.get('destination') && params.get('departDate')) {
+    doSearch();
+  }
+})();
+
+function getLiffId() {
+  // LIFF ID 可以從 meta tag 或環境取得
+  const meta = document.querySelector('meta[name="liff-id"]');
+  return meta ? meta.content : null;
+}
+
+// =============================================
+// UI 互動
+// =============================================
+function swapCities() {
+  const o = document.getElementById('origin');
+  const d = document.getElementById('destination');
+  [o.value, d.value] = [d.value, o.value];
+}
+
+function toggleChip(el) {
+  el.classList.toggle('active');
+}
+
+function getSelectedAirlines() {
+  return Array.from(document.querySelectorAll('.airline-chip.active'))
+    .map(el => el.dataset.code);
+}
+
+// =============================================
+// 搜尋
+// =============================================
+async function doSearch() {
+  const origin = document.getElementById('origin').value.trim().toUpperCase();
+  const destination = document.getElementById('destination').value.trim().toUpperCase();
+  const departDate = document.getElementById('departDate').value;
+  const returnDate = document.getElementById('returnDate').value;
+  const cabinClass = document.getElementById('cabinClass').value;
+  const adults = document.getElementById('adults').value;
+  const airlines = getSelectedAirlines();
+
+  if (!origin || !destination || !departDate) {
+    showMessage('⚠️', '請填寫必要資訊', '出發地、目的地、日期為必填');
+    return;
+  }
+
+  // UI: Loading
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> <span>搜尋中...</span>';
+  document.getElementById('sortBar').style.display = 'none';
+  showLoading();
+
+  try {
+    const qs = new URLSearchParams({
+      origin, destination, departDate, adults,
+      ...(returnDate && { returnDate }),
+      ...(cabinClass && { cabinClass }),
+      ...(airlines.length > 0 && { airlines: airlines.join(',') }),
+    });
+
+    const res = await fetch(`/api/flights/search?${qs}`);
+    const data = await res.json();
+
+    if (!data.success || (!data.outbound?.length && !data.inbound?.length)) {
+      showMessage('😢', '沒有找到航班',
+        data.error || `${origin} → ${destination} 在 ${departDate} 沒有符合條件的航班，試試其他日期或艙等？`);
+      return;
+    }
+
+    currentFlights = data.outbound || [];
+    currentSort = 'price';
+    renderFlights(currentFlights, data.elapsed);
+
+    document.getElementById('sortBar').style.display = 'flex';
+
+    // 更新 URL（方便分享）
+    const newUrl = `${window.location.pathname}?${qs}`;
+    window.history.replaceState(null, '', newUrl);
+
+  } catch (err) {
+    showMessage('❌', '搜尋失敗', `網路錯誤：${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span id="searchBtnText">🔍 搜尋航班</span>';
+  }
+}
+
+// =============================================
+// 排序
+// =============================================
+function sortResults(btnEl, sortKey) {
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+  btnEl.classList.add('active');
+  currentSort = sortKey;
+
+  const sorted = [...currentFlights].sort((a, b) => {
+    switch (sortKey) {
+      case 'price': return (a.price || 99999) - (b.price || 99999);
+      case 'depart': return (a.departTime || '').localeCompare(b.departTime || '');
+      case 'duration': return parseDuration(a.duration) - parseDuration(b.duration);
+      case 'stops': return (a.stops ?? 99) - (b.stops ?? 99);
+      default: return 0;
+    }
+  });
+
+  renderFlights(sorted);
+}
+
+function parseDuration(d) {
+  if (!d) return 9999;
+  const match = d.match(/(\d+)h\s*(\d+)?m?/);
+  return match ? parseInt(match[1]) * 60 + (parseInt(match[2]) || 0) : 9999;
+}
+
+// =============================================
+// 渲染
+// =============================================
+function renderFlights(flights, elapsed) {
+  const container = document.getElementById('results');
+  let html = '';
+
+  if (elapsed) {
+    html += `<div class="results-count">找到 <strong>${flights.length}</strong> 筆航班（${(elapsed/1000).toFixed(1)} 秒）</div>`;
+  }
+
+  flights.forEach((f, i) => {
+    const airlineCode = f.airline || '';
+    const color = AIRLINE_COLORS[airlineCode] || '#666';
+    const airlineName = f.airlineName || AIRLINE_NAMES[airlineCode] || airlineCode;
+    const cabin = f.cabinName || CABIN_NAMES[f.cabinClass] || '';
+    const aircraft = AIRCRAFT_NAMES[f.aircraft] || f.aircraft || '';
+    const stopsClass = f.stops === 0 ? 'stops-direct' : 'stops-transfer';
+    const stopsText = f.stops === 0 ? '直飛' : `轉機 ${f.stops} 次`;
+    const price = f.price ? Number(f.price).toLocaleString() : '—';
+    const bookUrl = getBookingUrl(f);
+
+    html += `
+      <div class="flight-card">
+        <div class="card-header">
+          <div class="airline-badge">
+            <span class="airline-dot" style="background:${color}"></span>
+            ${airlineName}
+            <span class="flight-number">${f.flightNumber || ''}</span>
+          </div>
+          ${cabin ? `<span class="cabin-tag">${cabin}</span>` : ''}
+        </div>
+        <div class="card-body">
+          <div class="time-row">
+            <div class="time-block">
+              <div class="time">${f.departTime || '--:--'}</div>
+              <div class="airport">${f.departAirport || ''}</div>
+            </div>
+            <div class="route-line">
+              <div class="duration">${f.duration || ''}</div>
+              <div class="line"></div>
+              <div class="stops-label ${stopsClass}">${stopsText}</div>
+            </div>
+            <div class="time-block">
+              <div class="time">${f.arriveTime || '--:--'}</div>
+              <div class="airport">${f.arriveAirport || ''}</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div>
+            <div class="price"><span class="currency">TWD</span> ${price}</div>
+            ${aircraft ? `<div class="aircraft-info">✈ ${aircraft}</div>` : ''}
+          </div>
+          <a class="btn-book" href="${bookUrl}" target="_blank" rel="noopener">訂票 →</a>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function getBookingUrl(flight) {
+  const code = flight.airline;
+  const urls = {
+    CI: 'https://www.china-airlines.com/tw/zh/booking/book-flights/flight-search',
+    BR: 'https://www.evaair.com/zh-tw/booking/flight-booking/',
+    JX: 'https://www.starlux-airlines.com/zh-TW/booking',
+    EK: 'https://www.emirates.com/tw/chinese/book/',
+    TK: 'https://www.turkishairlines.com/zh-tw/',
+    CX: 'https://www.cathaypacific.com/cx/zh_TW/book-a-trip/book-flights.html',
+    SQ: 'https://www.singaporeair.com/zh_TW/plan-and-book/book-a-trip/',
+  };
+  return urls[code] || `https://www.google.com/travel/flights?q=flights+${flight.flightNumber || ''}`;
+}
+
+function showLoading() {
+  const container = document.getElementById('results');
+  let html = '';
+  for (let i = 0; i < 4; i++) {
+    html += `
+      <div class="skeleton-card">
+        <div class="skeleton-line w60"></div>
+        <div class="skeleton-line h24 w80"></div>
+        <div class="skeleton-line w40"></div>
+      </div>
+    `;
+  }
+  container.innerHTML = html;
+}
+
+function showMessage(icon, title, desc) {
+  document.getElementById('results').innerHTML = `
+    <div class="status-message">
+      <div class="icon">${icon}</div>
+      <div class="title">${title}</div>
+      <div class="desc">${desc}</div>
+    </div>
+  `;
+}
+</script>
+
+</body>
+</html>

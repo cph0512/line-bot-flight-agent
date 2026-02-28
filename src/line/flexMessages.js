@@ -1,215 +1,192 @@
-// 航空公司品牌色
+// =============================================
+// LINE Flex Messages — 航班比價表格
+// =============================================
+
 const AIRLINE_COLORS = {
-  CI: "#D7177E", // 華航 pink
-  BR: "#00694A", // 長榮 green
-  JX: "#8B6914", // 星宇 gold
-  EK: "#D71921", // 阿聯酋 red
-  TK: "#C80815", // 土航 red
-  CX: "#006564", // 國泰 teal
-  SQ: "#F2A900", // 新航 gold
+  CI: "#D7177E", BR: "#00694A", JX: "#8B6914",
+  EK: "#D71921", TK: "#C80815", CX: "#006564", SQ: "#F2A900",
 };
 
-const DEFAULT_HEADER_COLOR = "#1a237e";
+const AIRLINE_NAMES_SHORT = {
+  CI: "華航", BR: "長榮", JX: "星宇",
+  EK: "阿聯酋", TK: "土航", CX: "國泰", SQ: "新航",
+};
+
+const AIRCRAFT_SHORT = {
+  "359": "A350", "35K": "A350", "351": "A350-1000",
+  "789": "B787-9", "78J": "B787-9", "788": "B787-8",
+  "77W": "B777-300ER", "773": "B777-300", "772": "B777-200",
+  "333": "A330-300", "332": "A330-200", "339": "A330neo",
+  "321": "A321", "320": "A320", "738": "B737-800",
+  "388": "A380", "744": "B747",
+};
 
 /**
- * 建立航班比價 Flex Message（carousel 最多 10 張卡片）
+ * 建立航班比價表格 Flex Message
  *
- * @param {Array} flights - 航班資料陣列
- * @returns {Object|null} LINE Flex Message 或 null（無資料時）
+ * 表格格式，一目了然比較多家航空公司
  */
 function createFlightComparisonFlex(flights) {
   if (!Array.isArray(flights) || flights.length === 0) return null;
 
-  const bubbles = flights.slice(0, 10).map((flight) => createFlightBubble(flight));
+  const displayFlights = flights.slice(0, 8); // 最多 8 筆（LINE body 有高度限制）
 
-  return {
-    type: "flex",
-    altText: `找到 ${flights.length} 筆航班比價結果`,
-    contents: {
-      type: "carousel",
-      contents: bubbles,
-    },
-  };
-}
+  // 建立表格行
+  const tableRows = [];
 
-/**
- * 建立單一航班 bubble
- */
-function createFlightBubble(f) {
-  const airline = f.airline || "";
-  const airlineName = f.airlineName || airline || "航空公司";
-  const flightNumber = f.flightNumber || "";
-  const departTime = f.departTime || "--:--";
-  const arriveTime = f.arriveTime || "--:--";
-  const duration = f.duration || "";
-  const stops = typeof f.stops === "number" ? f.stops : -1;
-  const cabinName = f.cabinName || f.cabinClass || "";
-  const price = typeof f.price === "number" ? f.price : null;
-  const currency = f.currency || "TWD";
+  // 表頭
+  tableRows.push({
+    type: "box",
+    layout: "horizontal",
+    contents: [
+      { type: "text", text: "航空/航班", size: "xxs", color: "#888888", flex: 3, weight: "bold" },
+      { type: "text", text: "出發→抵達", size: "xxs", color: "#888888", flex: 3, weight: "bold" },
+      { type: "text", text: "機型", size: "xxs", color: "#888888", flex: 2, weight: "bold" },
+      { type: "text", text: "票價", size: "xxs", color: "#888888", flex: 2, weight: "bold", align: "end" },
+    ],
+    paddingBottom: "6px",
+  });
 
-  const headerColor = AIRLINE_COLORS[airline] || DEFAULT_HEADER_COLOR;
-  const stopsText = stops === 0 ? "直飛" : stops > 0 ? `轉機${stops}次` : "";
+  tableRows.push({ type: "separator" });
 
-  // 價格格式化
-  const priceText = price !== null
-    ? `${currency} ${price.toLocaleString("en-US")}`
-    : "價格洽詢";
+  // 資料行
+  displayFlights.forEach((f, i) => {
+    const airline = AIRLINE_NAMES_SHORT[f.airline] || f.airlineName || f.airline || "?";
+    const flightNum = f.flightNumber || "";
+    const departTime = f.departTime || "--:--";
+    const arriveTime = f.arriveTime || "--:--";
+    const aircraft = AIRCRAFT_SHORT[f.aircraft] || f.aircraft || "";
+    const price = typeof f.price === "number" ? f.price.toLocaleString() : "—";
+    const stops = f.stops === 0 ? "直飛" : f.stops > 0 ? `轉${f.stops}` : "";
+    const stopsColor = f.stops === 0 ? "#188038" : "#CC6600";
+    const color = AIRLINE_COLORS[f.airline] || "#333333";
 
-  // 訂票連結（使用 Google Flights 作為通用連結）
-  const bookingUrl = f.bookingUrl || "https://www.google.com/travel/flights";
-
-  // 時間/中轉 資訊行
-  const durationStopsContents = [];
-  if (duration) {
-    durationStopsContents.push({
-      type: "text",
-      text: duration,
-      size: "sm",
-      color: "#555555",
-      flex: 0,
-    });
-  }
-  if (duration && stopsText) {
-    durationStopsContents.push({
-      type: "text",
-      text: "|",
-      size: "sm",
-      color: "#AAAAAA",
-      flex: 0,
-      margin: "md",
-    });
-  }
-  if (stopsText) {
-    durationStopsContents.push({
-      type: "text",
-      text: stopsText,
-      size: "sm",
-      color: stops === 0 ? "#00694A" : "#CC6600",
-      flex: 0,
-      margin: duration ? "md" : "none",
-    });
-  }
-
-  // body contents
-  const bodyContents = [
-    // Row 1: 出發 → 到達
-    {
+    // 第一行：航空+航班 | 時間 | 機型 | 票價
+    tableRows.push({
       type: "box",
       layout: "horizontal",
       contents: [
         {
-          type: "text",
-          text: departTime,
-          size: "xxl",
-          weight: "bold",
-          color: "#333333",
-          flex: 0,
+          type: "box",
+          layout: "vertical",
+          flex: 3,
+          contents: [
+            { type: "text", text: `${airline}`, size: "xs", weight: "bold", color },
+            { type: "text", text: flightNum, size: "xxs", color: "#888888" },
+          ],
         },
         {
-          type: "text",
-          text: "→",
-          size: "xl",
-          color: "#AAAAAA",
-          align: "center",
-          gravity: "center",
-          flex: 0,
-          margin: "md",
+          type: "box",
+          layout: "vertical",
+          flex: 3,
+          contents: [
+            { type: "text", text: `${departTime}→${arriveTime}`, size: "xs", color: "#333333" },
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                { type: "text", text: stops, size: "xxs", color: stopsColor, flex: 0 },
+                f.duration ? { type: "text", text: ` ${f.duration}`, size: "xxs", color: "#999999", flex: 0 } : { type: "filler" },
+              ],
+            },
+          ],
         },
-        {
-          type: "text",
-          text: arriveTime,
-          size: "xxl",
-          weight: "bold",
-          color: "#333333",
-          flex: 0,
-          margin: "md",
-        },
+        { type: "text", text: aircraft || "—", size: "xxs", color: "#666666", flex: 2, gravity: "center" },
+        { type: "text", text: price, size: "xs", weight: "bold", color: "#CC0000", flex: 2, align: "end", gravity: "center" },
       ],
-      margin: "md",
-    },
-  ];
-
-  // Row 2: duration | stops
-  if (durationStopsContents.length > 0) {
-    bodyContents.push({
-      type: "box",
-      layout: "horizontal",
-      contents: durationStopsContents,
-      margin: "sm",
+      paddingTop: "8px",
+      paddingBottom: "8px",
     });
-  }
 
-  // Row 3: cabin class
-  if (cabinName) {
-    bodyContents.push({
-      type: "text",
-      text: cabinName,
-      size: "sm",
-      color: "#555555",
-      margin: "sm",
-    });
-  }
-
-  // Separator
-  bodyContents.push({ type: "separator", margin: "lg" });
-
-  // Row 4: Price
-  bodyContents.push({
-    type: "text",
-    text: priceText,
-    size: "xl",
-    weight: "bold",
-    color: "#CC0000",
-    margin: "lg",
+    // 分隔線（最後一行不加）
+    if (i < displayFlights.length - 1) {
+      tableRows.push({ type: "separator", color: "#F0F0F0" });
+    }
   });
 
+  // 組合 Bubble
   const bubble = {
     type: "bubble",
-    size: "kilo",
+    size: "mega",
     header: {
       type: "box",
       layout: "vertical",
       contents: [
         {
-          type: "text",
-          text: `${airlineName}  ${flightNumber}`,
-          color: "#FFFFFF",
-          size: "md",
-          weight: "bold",
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "✈️ 航班比價結果", size: "md", weight: "bold", color: "#FFFFFF", flex: 0 },
+            { type: "text", text: `${displayFlights.length}筆`, size: "sm", color: "#FFFFFFCC", align: "end" },
+          ],
         },
+        buildSubtitleRow(displayFlights[0]),
       ],
-      backgroundColor: headerColor,
-      paddingAll: "15px",
+      backgroundColor: "#1a73e8",
+      paddingAll: "16px",
     },
     body: {
       type: "box",
       layout: "vertical",
-      contents: bodyContents,
-      paddingAll: "15px",
+      contents: tableRows,
+      paddingAll: "12px",
     },
-    footer: {
+  };
+
+  // 如果有 LIFF URL 或搜尋連結，加 footer
+  const cheapest = displayFlights[0];
+  if (cheapest) {
+    bubble.footer = {
       type: "box",
       layout: "vertical",
       contents: [
         {
-          type: "button",
-          action: {
-            type: "uri",
-            label: "查看詳情",
-            uri: bookingUrl,
-          },
-          style: "primary",
-          color: headerColor,
-          height: "sm",
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: `💰 最低 TWD ${cheapest.price?.toLocaleString() || "—"}`, size: "sm", weight: "bold", color: "#CC0000", flex: 0 },
+          ],
         },
       ],
-      paddingAll: "10px",
-    },
-  };
+      paddingAll: "12px",
+      backgroundColor: "#FFF8F8",
+    };
+  }
 
-  return bubble;
+  return {
+    type: "flex",
+    altText: `找到 ${displayFlights.length} 筆航班 | 最低 TWD ${displayFlights[0]?.price?.toLocaleString() || "—"}`,
+    contents: bubble,
+  };
 }
 
+/**
+ * 副標題行（路線+日期+艙等）
+ */
+function buildSubtitleRow(flight) {
+  if (!flight) return { type: "filler" };
+
+  const parts = [];
+  if (flight.departAirport && flight.arriveAirport) {
+    parts.push(`${flight.departAirport}→${flight.arriveAirport}`);
+  }
+  if (flight.cabinName) {
+    parts.push(flight.cabinName);
+  }
+  const text = parts.join(" | ") || "航班資訊";
+
+  return {
+    type: "text",
+    text,
+    size: "xs",
+    color: "#FFFFFFAA",
+    margin: "sm",
+  };
+}
+
+/**
+ * 歡迎訊息
+ */
 function createWelcomeMessage() {
   return {
     type: "flex",
@@ -220,12 +197,12 @@ function createWelcomeMessage() {
         type: "box", layout: "vertical", spacing: "md",
         contents: [
           { type: "text", text: "✈️ 智能機票助手", size: "xl", weight: "bold", color: "#1a73e8" },
-          { type: "text", text: "直接查詢航空公司官網，幫你比價！", size: "sm", wrap: true, margin: "md" },
-          { type: "text", text: "💰 現金票比價\n🎯 里程兌換查詢\n📊 現金 vs 里程划算分析\n🔗 直接訂票連結", size: "sm", wrap: true, margin: "md", color: "#555" },
+          { type: "text", text: "即時查詢全球航班，幫你比價！", size: "sm", wrap: true, margin: "md" },
+          { type: "text", text: "💰 多家航空比價表格\n✈️ 航班資訊 + 機型 + 票價\n🔍 篩選艙等與航空公司", size: "sm", wrap: true, margin: "md", color: "#555" },
           { type: "separator", margin: "lg" },
           { type: "text", text: "支援：華航 / 長榮 / 星宇 / 阿聯酋 / 土航 / 國泰 / 新航", size: "xs", wrap: true, margin: "md", color: "#888" },
           { type: "separator", margin: "md" },
-          { type: "text", text: "試試看跟我說：\n「台北飛東京 3/15到3/20 兩個人」\n「我有5萬長榮哩程，飛大阪划算嗎？」", size: "sm", wrap: true, margin: "md", color: "#1a73e8" },
+          { type: "text", text: "試試看跟我說：\n「台北飛東京 3/15到3/20 兩個人」\n「台北飛洛杉磯 豪華經濟艙 華航長榮比較」", size: "sm", wrap: true, margin: "md", color: "#1a73e8" },
         ],
       },
     },

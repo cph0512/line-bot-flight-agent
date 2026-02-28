@@ -1,9 +1,11 @@
 const express = require("express");
+const path = require("path");
 const { config, validateConfig } = require("./config");
 const { lineMiddleware } = require("./line/lineClient");
 const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
+const flightApi = require("./api/flightApi");
 const logger = require("./utils/logger");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
@@ -101,6 +103,11 @@ app.get("/health", async (req, res) => {
   res.status(allOk ? 200 : 500).json(report);
 });
 
+// ========== LIFF 小程式（靜態檔案）+ 航班 API ==========
+app.use(express.json());
+app.use("/api/flights", flightApi);
+app.use(express.static(path.join(__dirname, "..", "public")));
+
 // ========== LINE Webhook ==========
 app.post("/webhook", lineMiddleware, async (req, res) => {
   try {
@@ -134,6 +141,8 @@ app.listen(config.server.port, () => {
   console.log(`  Server:   http://localhost:${config.server.port}`);
   console.log(`  Webhook:  /webhook`);
   console.log(`  Health:   /health  <-- 啟動後請先訪問此檢查`);
+  console.log(`  LIFF:     /liff/   <-- 航班搜尋小程式`);
+  console.log(`  API:      /api/flights/search`);
   console.log(`  AI Model: ${config.anthropic.model}`);
   console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定" : "❌ 未設定（將使用 RPA）"}`);
   console.log(`  Browser:  Headless=${config.browser.headless}, MaxPages=${config.browser.maxPages}`);
