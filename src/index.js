@@ -30,8 +30,9 @@ const app = express();
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    name: "LINE 全能家庭 AI 管家 v4",
-    ai: config.gemini.apiKey ? `Gemini ${config.gemini.model}` : `Anthropic ${config.anthropic.model}`,
+    name: "LINE 全能家庭 AI 管家 v6",
+    ai_primary: config.gemini.apiKey ? `Gemini ${config.gemini.model}` : "not configured",
+    ai_fallback: config.anthropic.apiKey ? `Anthropic ${config.anthropic.model}` : "not configured",
     uptime: Math.round(process.uptime()) + "s",
     memory: Math.round(process.memoryUsage().rss / 1024 / 1024) + "MB",
     amadeus: amadeusClient.isAvailable() ? "configured" : "not configured",
@@ -215,17 +216,17 @@ app.use((err, req, res, next) => {
 // ========== 啟動 ==========
 app.listen(config.server.port, () => {
   console.log("\n" + "=".repeat(55));
-  console.log("  LINE 全能家庭 AI 管家 v4 已啟動");
+  console.log("  LINE 全能家庭 AI 管家 v6 已啟動");
   console.log("=".repeat(55));
   console.log(`  Server:   http://localhost:${config.server.port}`);
   console.log(`  Webhook:  /webhook`);
-  console.log(`  Health:   /health  <-- 啟動後請先訪問此檢查`);
-  console.log(`  LIFF:     /liff/   <-- 航班搜尋小程式`);
+  console.log(`  Health:   /health`);
+  console.log(`  LIFF:     /liff/`);
   console.log(`  API:      /api/flights/search`);
-  const aiLabel = config.gemini.apiKey
-    ? `Gemini ${config.gemini.model}`
-    : `Anthropic ${config.anthropic.model}`;
-  console.log(`  AI Model: ${aiLabel}`);
+  const primary = config.gemini.apiKey ? `Gemini ${config.gemini.model}` : "未設定";
+  const fallback = config.anthropic.apiKey ? `Anthropic ${config.anthropic.model}` : "未設定";
+  console.log(`  AI 主要:  ${primary}`);
+  console.log(`  AI 備援:  ${fallback}`);
   console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定" : "❌ 未設定（將使用 RPA）"}`);
   console.log(`  Browser:  Headless=${config.browser.headless}, MaxPages=${config.browser.maxPages}`);
   console.log("  " + "-".repeat(53));

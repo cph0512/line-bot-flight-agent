@@ -1,11 +1,8 @@
 // =============================================
-// AI Agent（全能管家版 v5 — Gemini 優化版）
+// AI Agent（全能管家版 v6 — Gemini + Anthropic 自動切換）
 //
-// 核心改進：
-// - 精簡 system prompt（Gemini 偏好短指令）
-// - 明確 toolConfig 確保 function calling 啟用
-// - Schema 轉換支援 INTEGER 型別
-// - 加強 debug logging
+// 優先使用 Gemini（免費），額度爆掉自動切 Anthropic
+// 兩個都沒有 key 才會報錯
 // =============================================
 
 const { GoogleGenAI } = require("@google/genai");
@@ -21,30 +18,28 @@ const {
 const { weatherService, newsService, calendarService, briefingService } = require("../services");
 const logger = require("../utils/logger");
 
-// ========== AI Client 初始化 ==========
-const useGemini = !!config.gemini.apiKey;
+// ========== AI Client 初始化（兩個都初始化）==========
 let genAI = null;
 let anthropic = null;
 
-if (useGemini) {
+if (config.gemini.apiKey) {
   genAI = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-  logger.info("[AI] 使用 Gemini 引擎");
-} else {
+  logger.info("[AI] Gemini 引擎已初始化");
+}
+if (config.anthropic.apiKey) {
   const Anthropic = require("@anthropic-ai/sdk").default;
   anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
-  logger.info("[AI] 使用 Anthropic 引擎");
+  logger.info("[AI] Anthropic 引擎已初始化（備援）");
 }
+
+// Gemini 429 冷卻機制
+let geminiCooldownUntil = 0; // timestamp，冷卻期間自動切 Anthropic
 
 // ========== 工具定義轉換（Anthropic → Gemini）==========
 
-/**
- * 轉換 Schema type 為 Gemini 格式
- * Gemini 支援：STRING, NUMBER, INTEGER, BOOLEAN, ARRAY, OBJECT
- */
 function toGeminiType(type) {
   if (!type) return "STRING";
   const t = type.toUpperCase();
-  // 確保是 Gemini 支援的型別
   const valid = ["STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT"];
   return valid.includes(t) ? t : "STRING";
 }
@@ -52,60 +47,39 @@ function toGeminiType(type) {
 function convertSchema(schema) {
   if (!schema) return undefined;
   const result = {};
-
   result.type = toGeminiType(schema.type);
   if (schema.description) result.description = schema.description;
   if (schema.enum) result.enum = schema.enum;
-
-  // required 必須是陣列
-  if (Array.isArray(schema.required)) {
-    result.required = schema.required;
-  }
-
-  // 遞迴轉換 properties
+  if (Array.isArray(schema.required)) result.required = schema.required;
   if (schema.properties && Object.keys(schema.properties).length > 0) {
     result.properties = {};
     for (const [key, val] of Object.entries(schema.properties)) {
       const prop = { ...val };
-      delete prop.default; // Gemini 不支援 default
+      delete prop.default;
       result.properties[key] = convertSchema(prop);
     }
   }
-
-  // Array items
-  if (schema.items) {
-    result.items = convertSchema(schema.items);
-  }
-
+  if (schema.items) result.items = convertSchema(schema.items);
   return result;
 }
 
 function convertToolsToGemini(tools) {
-  const declarations = [];
-
-  for (const t of tools) {
-    const decl = {
-      name: t.name,
-      description: t.description,
-    };
-
+  const declarations = tools.map((t) => {
+    const decl = { name: t.name, description: t.description };
     const schema = t.input_schema;
     if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
       decl.parameters = convertSchema(schema);
     }
-
-    declarations.push(decl);
-  }
-
-  logger.info(`[AI] 轉換工具定義: ${declarations.map(d => d.name).join(", ")} (共 ${declarations.length} 個)`);
-
+    return decl;
+  });
+  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")}`);
   return [{ functionDeclarations: declarations }];
 }
 
-const geminiTools = convertToolsToGemini(anthropicTools);
+const geminiTools = genAI ? convertToolsToGemini(anthropicTools) : null;
 
 /**
- * 動態生成系統提示（Gemini 優化：精簡版）
+ * 系統提示（精簡版，Gemini 和 Anthropic 共用）
  */
 function getSystemPrompt() {
   const today = new Date().toISOString().slice(0, 10);
@@ -123,11 +97,11 @@ function getSystemPrompt() {
 - 使用者問行程/行事曆 → 呼叫 get_events
 - 使用者說早報/晨報/今日摘要/每日簡報 → 呼叫 trigger_briefing
 - 使用者說加行程/新增會議 → 呼叫 add_event
-- 使用者說改行程/更新 → 先 get_events 再 update_event
+- 使用者說改行程 → 先 get_events 再 update_event
 - 使用者說刪行程/取消 → 先 get_events 再 delete_event
 
 ## 航班回覆格式
-系統自動產生 Flex 卡片，你的文字只做分析摘要。不要用 markdown 表格。格式：
+系統自動產生 Flex 卡片，你只做分析摘要。不要用 markdown 表格。格式：
 
 ✈️ 出發地 → 目的地
 📅 日期 | 艙等
@@ -139,7 +113,6 @@ function getSystemPrompt() {
 
 📊 其他：
 2️⃣ 航空 航班號 | 時間 | NT$票價
-3️⃣ 航空 航班號 | 時間 | NT$票價
 
 ## 新聞回覆格式
 不要附連結URL。格式：
@@ -154,11 +127,9 @@ function getSystemPrompt() {
 
 ⭐ 一句焦點總結
 
-## 航空代碼
-CI=華航 BR=長榮 JX=星宇 EK=阿聯酋 TK=土航 CX=國泰 SQ=新航
-
-## 城市代碼
-台北:TPE 東京:NRT 大阪:KIX 首爾:ICN 曼谷:BKK 新加坡:SIN 香港:HKG 倫敦:LHR 紐約:JFK 洛杉磯:LAX`;
+## 代碼表
+航空：CI=華航 BR=長榮 JX=星宇 EK=阿聯酋 TK=土航 CX=國泰 SQ=新航
+城市：台北:TPE 東京:NRT 大阪:KIX 首爾:ICN 曼谷:BKK 新加坡:SIN 香港:HKG 倫敦:LHR 紐約:JFK 洛杉磯:LAX`;
 }
 
 // 對話記錄
@@ -166,7 +137,7 @@ const conversations = new Map();
 const MAX_HISTORY = 20;
 
 /**
- * 處理使用者訊息 - 主入口
+ * 處理使用者訊息 - 主入口（自動切換引擎）
  */
 async function handleMessage(userId, userMessage) {
   logger.info(`[AI] === 收到訊息 === userId=${userId.slice(-6)} msg="${userMessage}"`);
@@ -177,12 +148,52 @@ async function handleMessage(userId, userMessage) {
   while (history.length > MAX_HISTORY) history.shift();
 
   try {
-    const response = useGemini
-      ? await runGeminiLoop(history)
-      : await runAnthropicLoop(history);
+    // 決定使用哪個引擎
+    const now = Date.now();
+    const geminiAvailable = genAI && now > geminiCooldownUntil;
+    const anthropicAvailable = !!anthropic;
+
+    let response;
+
+    if (geminiAvailable) {
+      // 先嘗試 Gemini
+      try {
+        response = await runGeminiLoop(history);
+      } catch (error) {
+        // 429 或其他 Gemini 錯誤 → 自動切到 Anthropic
+        if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || error.message?.includes("quota")) {
+          logger.warn(`[AI] Gemini 額度用完，冷卻 10 分鐘，切換到 Anthropic`);
+          geminiCooldownUntil = now + 10 * 60 * 1000; // 10 分鐘冷卻
+
+          if (anthropicAvailable) {
+            response = await runAnthropicLoop(history);
+          } else {
+            return { text: "⚠️ Gemini 免費額度已用完，請稍後再試（約 1 分鐘後重置）。\n\n如需立即使用，可設定 ANTHROPIC_API_KEY 作為備援。" };
+          }
+        } else {
+          // 其他錯誤也嘗試 fallback
+          logger.error(`[AI] Gemini 錯誤: ${error.message}`);
+          if (anthropicAvailable) {
+            logger.info("[AI] 自動切換到 Anthropic");
+            response = await runAnthropicLoop(history);
+          } else {
+            throw error;
+          }
+        }
+      }
+    } else if (anthropicAvailable) {
+      // Gemini 冷卻中或沒有 key，用 Anthropic
+      const cooldownRemain = Math.max(0, Math.ceil((geminiCooldownUntil - now) / 1000));
+      if (geminiCooldownUntil > now) {
+        logger.info(`[AI] Gemini 冷卻中（還剩 ${cooldownRemain}s），使用 Anthropic`);
+      }
+      response = await runAnthropicLoop(history);
+    } else {
+      return { text: "未設定任何 AI API Key。請在環境變數設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY。" };
+    }
 
     history.push({ role: "assistant", content: response.text });
-    logger.info(`[AI] === 回覆完成 === 去程=${response.flights?.length || 0} 回程=${response.inboundFlights?.length || 0} textLen=${response.text?.length || 0}`);
+    logger.info(`[AI] === 回覆完成 === flights=${response.flights?.length || 0} textLen=${response.text?.length || 0}`);
     return response;
   } catch (error) {
     logger.error("[AI] handleMessage 失敗", { error: error.message, stack: error.stack });
@@ -203,13 +214,11 @@ async function runGeminiLoop(history) {
   );
 
   const agentWork = async () => {
-    // 轉換歷史紀錄為 Gemini contents 格式
     const contents = history.map((msg) => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }],
     }));
 
-    // Gemini 設定：明確啟用 function calling
     const geminiConfig = {
       systemInstruction: getSystemPrompt(),
       tools: geminiTools,
@@ -220,7 +229,7 @@ async function runGeminiLoop(history) {
       },
     };
 
-    logger.info(`[AI] Gemini API (${config.gemini.model}) contents=${contents.length} tools=${geminiTools[0].functionDeclarations.length}`);
+    logger.info(`[AI] Gemini (${config.gemini.model}) contents=${contents.length}`);
 
     while (iterations-- > 0) {
       let response;
@@ -231,43 +240,32 @@ async function runGeminiLoop(history) {
           config: geminiConfig,
         });
       } catch (e) {
-        logger.error(`[AI] Gemini API 錯誤: ${e.message}`, { stack: e.stack });
-        return { text: `AI 呼叫失敗：${e.message}` };
+        // 429 錯誤往上拋，讓 handleMessage 處理 fallback
+        logger.error(`[AI] Gemini API 錯誤: ${e.message}`);
+        throw e;
       }
 
-      // 檢查 function calls
       const functionCalls = response.functionCalls || [];
       logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text}`);
 
       if (functionCalls.length === 0) {
-        const text = response.text || "抱歉，我不太理解。試試看：「台灣新聞」「台北天氣」「晨報」";
-        logger.info(`[AI] 純文字回覆: "${text.slice(0, 80)}..."`);
+        const text = response.text || "抱歉，我不太理解。試試：「台灣新聞」「台北天氣」「晨報」";
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
-      // 把 model 的回覆（含 functionCall）加入 contents
-      if (response.candidates && response.candidates[0] && response.candidates[0].content) {
+      if (response.candidates?.[0]?.content) {
         contents.push(response.candidates[0].content);
       }
 
-      // 執行所有 function calls
       const functionResponseParts = [];
-
       for (const fc of functionCalls) {
-        logger.info(`[AI] >>> 呼叫工具: ${fc.name}`, { args: JSON.stringify(fc.args) });
-
+        logger.info(`[AI] >>> 工具: ${fc.name}`, { args: JSON.stringify(fc.args) });
         const startTime = Date.now();
         const result = await executeTool(fc.name, fc.args || {});
-        const elapsed = Date.now() - startTime;
+        logger.info(`[AI] <<< 完成: ${fc.name} (${Date.now() - startTime}ms)`);
 
-        logger.info(`[AI] <<< 工具完成: ${fc.name} (${elapsed}ms) textLen=${result.text?.length || 0}`);
-
-        if (result.flights && result.flights.length > 0) {
-          lastFlights = result.flights;
-        }
-        if (result.inboundFlights && result.inboundFlights.length > 0) {
-          lastInboundFlights = result.inboundFlights;
-        }
+        if (result.flights?.length > 0) lastFlights = result.flights;
+        if (result.inboundFlights?.length > 0) lastInboundFlights = result.inboundFlights;
 
         functionResponseParts.push({
           functionResponse: {
@@ -277,7 +275,6 @@ async function runGeminiLoop(history) {
         });
       }
 
-      // 把工具結果加入 contents
       contents.push({ role: "user", parts: functionResponseParts });
     }
 
@@ -288,7 +285,7 @@ async function runGeminiLoop(history) {
 }
 
 // ================================================================
-// Anthropic Agent Loop (Fallback)
+// Anthropic Agent Loop
 // ================================================================
 async function runAnthropicLoop(history) {
   const messages = [...history];
@@ -302,7 +299,7 @@ async function runAnthropicLoop(history) {
 
   const agentWork = async () => {
     while (iterations-- > 0) {
-      logger.info(`[AI] 呼叫 Anthropic API... (剩餘迴圈=${iterations + 1})`);
+      logger.info(`[AI] Anthropic (${config.anthropic.model}) 迴圈=${iterations + 1}`);
 
       const res = await anthropic.messages.create({
         model: config.anthropic.model,
@@ -324,16 +321,13 @@ async function runAnthropicLoop(history) {
         const toolResults = [];
 
         for (const tu of res.content.filter((b) => b.type === "tool_use")) {
-          logger.info(`[AI] >>> 呼叫工具: ${tu.name}`, { input: JSON.stringify(tu.input) });
-
+          logger.info(`[AI] >>> 工具: ${tu.name}`);
           const startTime = Date.now();
           const result = await executeTool(tu.name, tu.input);
-          const elapsed = Date.now() - startTime;
+          logger.info(`[AI] <<< 完成: ${tu.name} (${Date.now() - startTime}ms)`);
 
-          logger.info(`[AI] <<< 工具完成: ${tu.name} (${elapsed}ms)`);
-
-          if (result.flights && result.flights.length > 0) lastFlights = result.flights;
-          if (result.inboundFlights && result.inboundFlights.length > 0) lastInboundFlights = result.inboundFlights;
+          if (result.flights?.length > 0) lastFlights = result.flights;
+          if (result.inboundFlights?.length > 0) lastInboundFlights = result.inboundFlights;
 
           toolResults.push({
             type: "tool_result",
@@ -363,7 +357,6 @@ async function runAnthropicLoop(history) {
 async function executeTool(name, input) {
   logger.info(`[Tool] ${name}`, { input: JSON.stringify(input) });
 
-  // === 航班相關工具 ===
   const flightTools = ["search_all_flights", "search_cash_only", "search_miles_only", "get_booking_links"];
   if (flightTools.includes(name)) {
     const params = {
@@ -376,18 +369,15 @@ async function executeTool(name, input) {
     };
     const airlines = input.airlines || [];
 
-    logger.info(`[Tool] ${name}: ${params.origin}→${params.destination} ${params.departDate}`);
-
     switch (name) {
       case "search_all_flights": {
         try {
           const result = await searchAll(params, airlines);
           const text = formatResultsForAI(result);
           const { outbound, inbound } = extractFlightsForFlex(result);
-          logger.info(`[Tool] search_all 完成: 去程=${outbound.length} 回程=${inbound.length}`);
           return { text, flights: outbound, inboundFlights: inbound };
         } catch (e) {
-          logger.error(`[Tool] search_all 失敗`, { error: e.message });
+          logger.error(`[Tool] search_all 失敗: ${e.message}`);
           return { text: `搜尋失敗：${e.message}` };
         }
       }
@@ -395,9 +385,7 @@ async function executeTool(name, input) {
         try {
           const result = await searchCashFlights(params, airlines);
           const text = formatResultsForAI(result);
-          const outbound = result.flights || [];
-          const inbound = result.inboundFlights || [];
-          return { text, flights: outbound, inboundFlights: inbound };
+          return { text, flights: result.flights || [], inboundFlights: result.inboundFlights || [] };
         } catch (e) {
           return { text: `現金票搜尋失敗：${e.message}` };
         }
@@ -413,23 +401,19 @@ async function executeTool(name, input) {
       }
       case "get_booking_links": {
         const links = getBookingLinks(params);
-        const text = links.map((l) => `${l.airline}: ${l.url}`).join("\n");
-        return { text };
+        return { text: links.map((l) => `${l.airline}: ${l.url}`).join("\n") };
       }
     }
   }
 
-  // === 天氣 ===
   if (name === "get_weather") {
     return await weatherService.getWeather(input.city, input.days || 1);
   }
 
-  // === 新聞 ===
   if (name === "get_news") {
     return await newsService.getNews(input.category || "general", input.count || 7, input.region || "tw");
   }
 
-  // === 行事曆 ===
   if (name === "get_events") {
     if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
     return await calendarService.getEvents(input.calendarName, input.startDate, input.endDate);
@@ -452,7 +436,6 @@ async function executeTool(name, input) {
     return await calendarService.deleteEvent(input.eventId, input.calendarName);
   }
 
-  // === 每日晨報 ===
   if (name === "trigger_briefing") {
     if (!briefingService.isAvailable()) return { text: "每日晨報功能未啟用（未設定 BRIEFING_RECIPIENTS）。" };
     try {
@@ -466,26 +449,13 @@ async function executeTool(name, input) {
   return { text: `未知工具：${name}` };
 }
 
-/**
- * 從完整比價結果提取航班資料供 Flex Message 使用
- */
 function extractFlightsForFlex(result) {
   const outbound = [];
   const inbound = [];
-
-  if (result.cash && result.cash.flights && result.cash.flights.length > 0) {
-    outbound.push(...result.cash.flights);
-  }
-  if (result.inbound && result.inbound.length > 0) {
-    inbound.push(...result.inbound);
-  } else if (result.cash && result.cash.inboundFlights && result.cash.inboundFlights.length > 0) {
-    inbound.push(...result.cash.inboundFlights);
-  }
-
-  return {
-    outbound: outbound.slice(0, 10),
-    inbound: inbound.slice(0, 10),
-  };
+  if (result.cash?.flights?.length > 0) outbound.push(...result.cash.flights);
+  if (result.inbound?.length > 0) inbound.push(...result.inbound);
+  else if (result.cash?.inboundFlights?.length > 0) inbound.push(...result.cash.inboundFlights);
+  return { outbound: outbound.slice(0, 10), inbound: inbound.slice(0, 10) };
 }
 
 function clearHistory(userId) {
