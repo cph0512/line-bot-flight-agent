@@ -103,12 +103,9 @@ app.get("/health", async (req, res) => {
   res.status(allOk ? 200 : 500).json(report);
 });
 
-// ========== LIFF 小程式（靜態檔案）+ 航班 API ==========
-app.use(express.json());
-app.use("/api/flights", flightApi);
-app.use(express.static(path.join(__dirname, "..", "public")));
-
-// ========== LINE Webhook ==========
+// ========== LINE Webhook（必須放在 express.json() 之前！）==========
+// LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
+// 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
 app.post("/webhook", lineMiddleware, async (req, res) => {
   try {
     const events = req.body.events;
@@ -124,6 +121,12 @@ app.post("/webhook", lineMiddleware, async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// ========== LIFF 小程式（靜態檔案）+ 航班 API ==========
+// express.json() 放在 webhook 之後，避免影響 LINE 簽名驗證
+app.use("/api", express.json());
+app.use("/api/flights", flightApi);
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.use((err, req, res, next) => {
   if (err.message?.includes("signature")) {
