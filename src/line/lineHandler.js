@@ -42,6 +42,12 @@ async function handleSingleEvent(event) {
       messages: [createWelcomeMessage()],
     });
   }
+  if (["我的id", "我的ID", "myid", "my id", "userid"].includes(text.toLowerCase())) {
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: `你的 LINE User ID：\n${userId}\n\n請複製此 ID 貼到 Railway 的 BRIEFING_RECIPIENTS 環境變數。` }],
+    });
+  }
 
   // 顯示 loading
   try {
