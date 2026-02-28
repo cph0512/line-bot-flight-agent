@@ -15,7 +15,7 @@ const {
   formatResultsForAI,
   getBookingLinks,
 } = require("../scraper/scraperEngine");
-const { weatherService, newsService, calendarService, briefingService } = require("../services");
+const { weatherService, newsService, calendarService, briefingService, webSearchService } = require("../services");
 const logger = require("../utils/logger");
 
 // ========== AI Client 初始化（兩個都初始化）==========
@@ -73,10 +73,7 @@ function convertToolsToGemini(tools) {
     return decl;
   });
   logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")}`);
-  return [
-    { functionDeclarations: declarations },
-    { googleSearch: {} },  // Google Search grounding：讓 Gemini 自動搜尋網路
-  ];
+  return [{ functionDeclarations: declarations }];
 }
 
 const geminiTools = genAI ? convertToolsToGemini(anthropicTools) : null;
@@ -92,9 +89,11 @@ function getSystemPrompt() {
 今天：${today}。日期沒年份預設 ${year} 年，已過就用 ${year + 1} 年。
 
 你有三種能力：
-1. 專用工具：機票查詢、天氣、新聞、行事曆、晨報（用下面的工具）
-2. Google 搜尋：遇到你不確定的事實、即時資訊、推薦餐廳景點等，自動上網搜尋
-3. 一般聊天：日常對話、問答、建議、翻譯、計算等直接回覆
+1. 專用工具：機票查詢、天氣、新聞、行事曆、晨報
+2. 網路搜尋：用 search_web 工具上網查即時資訊（股價、賽程、推薦、任何你不確定的事）
+3. 一般聊天：日常對話、問答、建議、翻譯、計算
+
+重要規則：當你不確定答案或需要即時資訊時，一定要先呼叫 search_web 搜尋，不要自己猜。
 
 ⚠️ 絕對禁止編造的資料（違反會失去使用者信任）：
 - 股價、匯率、基金淨值等金融數據
@@ -104,7 +103,7 @@ function getSystemPrompt() {
 如果搜尋不到即時數據，請誠實說「我目前無法查到即時數據」，並建議使用者去哪裡查（如：Yahoo 股市、Google Finance）。
 絕對不可以自己編一個看起來合理的數字。
 
-## 專用工具使用規則
+## 工具使用規則
 - 機票/航班/比價 → search_all_flights（預設出發 TPE）
 - 天氣/溫度/下雨 → get_weather
 - 新聞（台灣/國際/科技/財經等）→ get_news
@@ -113,6 +112,7 @@ function getSystemPrompt() {
 - 加行程/新增會議 → add_event
 - 改行程 → 先 get_events 再 update_event
 - 刪行程/取消 → 先 get_events 再 delete_event
+- 股價/匯率/賽程/活動/推薦/任何需要查證的問題 → search_web
 
 ## 航班回覆格式
 系統自動產生 Flex 卡片，你只做分析摘要。不要用 markdown 表格。格式：
@@ -481,6 +481,15 @@ async function executeTool(name, input) {
       return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };
     } catch (e) {
       return { text: `晨報推送失敗：${e.message}` };
+    }
+  }
+
+  if (name === "search_web") {
+    try {
+      return await webSearchService.searchWeb(input.query, input.count || 5);
+    } catch (e) {
+      logger.error(`[Tool] search_web 失敗: ${e.message}`);
+      return { text: `網路搜尋失敗：${e.message}。建議到 Google 搜尋：https://www.google.com/search?q=${encodeURIComponent(input.query || "")}` };
     }
   }
 

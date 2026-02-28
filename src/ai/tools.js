@@ -189,6 +189,18 @@ const tools = [
       required: [],
     },
   },
+  {
+    name: "search_web",
+    description: "上網搜尋即時資訊。當使用者問的問題需要最新資料時使用，例如：股價、賽程、活動時間、餐廳推薦、任何你不確定的事實。優先使用此工具查詢，不要自己猜測。",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "搜尋關鍵字，用中文或英文皆可" },
+        count: { type: "integer", description: "回傳筆數 1-8，預設 5" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 module.exports = { tools };
