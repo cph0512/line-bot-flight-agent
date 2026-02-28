@@ -7,7 +7,7 @@ const config = {
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    model: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
   },
   browser: {
     headless: process.env.BROWSER_HEADLESS !== "false",
