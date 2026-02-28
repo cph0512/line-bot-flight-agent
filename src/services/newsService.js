@@ -67,6 +67,9 @@ function parseRssXml(xml, count) {
     const sourceMatch = item.match(/<source[^>]*>(.*?)<\/source>/) || item.match(/<source[^>]*><!\[CDATA\[(.*?)\]\]><\/source>/);
     const source = sourceMatch ? (sourceMatch[1] || "").trim() : "";
 
+    const linkMatch = item.match(/<link>(.*?)<\/link>/) || item.match(/<link><!\[CDATA\[(.*?)\]\]><\/link>/);
+    const link = linkMatch ? (linkMatch[1] || "").trim() : "";
+
     const pubDateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/);
     const pubDate = pubDateMatch ? pubDateMatch[1].trim() : "";
 
@@ -79,6 +82,7 @@ function parseRssXml(xml, count) {
     articles.push({
       title: cleanTitle,
       source: source || extractSourceFromTitle(title),
+      link,
       date: pubDate ? formatDate(pubDate) : "",
     });
   }
@@ -204,6 +208,7 @@ async function fetchGoogleNews(cat, num, catName, isWorld = false) {
     text += `   來源: ${article.source}`;
     if (article.date) text += ` | ${article.date}`;
     text += "\n";
+    if (article.link) text += `   🔗 ${article.link}\n`;
   });
 
   return { text };
