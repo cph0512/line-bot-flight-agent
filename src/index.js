@@ -6,7 +6,7 @@ const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
 const flightApi = require("./api/flightApi");
-const { weatherService, newsService, calendarService, briefingService } = require("./services");
+const { weatherService, newsService, calendarService, briefingService, googleFlightsService } = require("./services");
 const logger = require("./utils/logger");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
@@ -36,6 +36,7 @@ app.get("/", (req, res) => {
     uptime: Math.round(process.uptime()) + "s",
     memory: Math.round(process.memoryUsage().rss / 1024 / 1024) + "MB",
     amadeus: amadeusClient.isAvailable() ? "configured" : "not configured",
+    googleFlights: googleFlightsService.isAvailable() ? "enabled" : "disabled (no RAPIDAPI_KEY)",
     weather: weatherService.isAvailable() ? "enabled" : "disabled",
     news: newsService.isAvailable() ? "enabled" : "disabled",
     calendar: calendarService.isAvailable() ? "enabled" : "disabled",
@@ -127,6 +128,7 @@ app.get("/health", async (req, res) => {
 
   // 5. 選填模組狀態
   report.modules = {
+    googleFlights: googleFlightsService.isAvailable() ? "enabled ✅" : "disabled ❌ (no RAPIDAPI_KEY)",
     weather: weatherService.isAvailable() ? "enabled" : "disabled (no CWA_API_KEY)",
     news: newsService.isAvailable() ? "enabled" : "disabled (no NEWS_API_KEY)",
     calendar: calendarService.isAvailable() ? "enabled" : "disabled (no Google Calendar config)",
@@ -192,6 +194,33 @@ app.get("/debug/search", async (req, res) => {
   }
 });
 
+// ========== Google Flights 測試端點 ==========
+app.get("/debug/flights", async (req, res) => {
+  if (!googleFlightsService.isAvailable()) {
+    return res.json({ success: false, error: "RAPIDAPI_KEY 未設定" });
+  }
+  const origin = req.query.from || "TPE";
+  const destination = req.query.to || "NRT";
+  const date = req.query.date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  try {
+    const result = await googleFlightsService.searchFlights({ origin, destination, departDate: date });
+    res.json({
+      success: true,
+      query: { origin, destination, date },
+      flightsCount: result.flights?.length || 0,
+      text: result.text?.slice(0, 500),
+      firstFlight: result.flights?.[0] ? {
+        airline: result.flights[0].airline,
+        flightNumber: result.flights[0].flightNumber,
+        price: result.flights[0].price,
+        stops: result.flights[0].stops,
+      } : null,
+    });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 // ========== LINE Webhook（必須放在 express.json() 之前！）==========
 // LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
 // 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
@@ -239,7 +268,8 @@ app.listen(config.server.port, () => {
   const fallback = config.anthropic.apiKey ? `Anthropic ${config.anthropic.model}` : "未設定";
   console.log(`  AI 主要:  ${primary}`);
   console.log(`  AI 備援:  ${fallback}`);
-  console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定" : "❌ 未設定（將使用 RPA）"}`);
+  console.log(`  Google Flights: ${googleFlightsService.isAvailable() ? "✅ RapidAPI 已設定" : "❌ 未設定 RAPIDAPI_KEY"}`);
+  console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定（備援）" : "❌ 未設定"}`);
   console.log(`  Browser:  Headless=${config.browser.headless}, MaxPages=${config.browser.maxPages}`);
   console.log("  " + "-".repeat(53));
   console.log(`  天氣:     ${weatherService.isAvailable() ? "✅ CWA 已設定" : "⬜ 未設定"}`);
