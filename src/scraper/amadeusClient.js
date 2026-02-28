@@ -210,13 +210,17 @@ function parseOffer(offer, dictionaries, rank) {
       (code) => dictionaries.aircraft?.[code] || code
     );
 
-    // 艙等（從 travelerPricings 取得）
+    // 艙等 + 訂位艙等代碼 + 票種品牌（從 travelerPricings 取得）
     let cabinClass = "ECONOMY";
     let cabinName = "經濟艙";
+    let bookingClass = "";    // 訂位艙等代碼（P, T, K, Y, etc.）
+    let brandedFare = "";     // 票種品牌（BASIC, STANDARD, UP, etc.）
     const fareDetails = offer.travelerPricings?.[0]?.fareDetailsBySegment;
     if (fareDetails && fareDetails.length > 0) {
       cabinClass = fareDetails[0].cabin || "ECONOMY";
       cabinName = CABIN_NAMES[cabinClass] || cabinClass;
+      bookingClass = fareDetails[0].class || "";
+      brandedFare = fareDetails[0].brandedFare || "";
     }
 
     // 轉機次數
@@ -246,12 +250,14 @@ function parseOffer(offer, dictionaries, rank) {
       departAirport,
       arriveAirport,
       duration,
-      price: totalPrice, // 每筆都帶價格（來回總價），方便顯示
+      price: totalPrice,
       isRoundTrip,
       currency,
       stops,
       cabinClass,
       cabinName,
+      bookingClass,   // P, T, K, Y, C, J, F 等
+      brandedFare,    // BASIC, STANDARD, UP 等（正式環境才有）
       aircraft: aircraftNames.join(", "),
       direction: isOutbound ? "outbound" : "inbound",
       seatsLeft: offer.numberOfBookableSeats ? `剩${offer.numberOfBookableSeats}席` : "",

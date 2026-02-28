@@ -67,18 +67,21 @@ function withTimeout(promise, ms, label) {
 }
 
 /**
- * 去重航班（相同航班號+出發時間只保留一筆，保留最便宜的）
+ * 去重航班
+ * - 相同航班號+出發時間+價格 = 真正重複（去回程組合造成），只保留一筆
+ * - 相同航班號+出發時間但不同價格 = 不同票種等級，全部保留
  */
 function deduplicateFlights(flights) {
-  const seen = new Map();
+  const seen = new Set();
+  const deduped = [];
   for (const f of flights) {
-    const key = `${f.flightNumber}|${f.departTime}`;
-    const existing = seen.get(key);
-    if (!existing || (f.price && (!existing.price || f.price < existing.price))) {
-      seen.set(key, f);
+    // key 包含價格，這樣不同票價等級（Basic/Standard/Up）會被保留
+    const key = `${f.flightNumber}|${f.departTime}|${f.price}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(f);
     }
   }
-  const deduped = [...seen.values()];
   deduped.sort((a, b) => (a.price || 0) - (b.price || 0));
   deduped.forEach((f, i) => (f.rank = i + 1));
   return deduped;

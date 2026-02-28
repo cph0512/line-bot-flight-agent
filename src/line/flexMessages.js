@@ -122,6 +122,10 @@ function buildFlightBubble(flights, { title, headerColor, isRoundTrip, showPrice
     const stopsColor = f.stops === 0 ? "#188038" : "#CC6600";
     const color = AIRLINE_COLORS[f.airline] || "#333333";
     const durationText = f.duration || "";
+    // 票種等級標示（如 Basic(P), Standard(T), Up(K)）
+    const fareLabel = f.brandedFare
+      ? `${f.brandedFare}(${f.bookingClass})`
+      : f.bookingClass ? `(${f.bookingClass})` : "";
 
     // 最後一欄：去程顯示價格，回程顯示飛行時間
     const lastCol = showPrice
@@ -138,7 +142,7 @@ function buildFlightBubble(flights, { title, headerColor, isRoundTrip, showPrice
           flex: 3,
           contents: [
             { type: "text", text: airline, size: "xs", weight: "bold", color },
-            { type: "text", text: flightNum, size: "xxs", color: "#888888" },
+            { type: "text", text: fareLabel ? `${flightNum} ${fareLabel}` : flightNum, size: "xxs", color: "#888888" },
           ],
         },
         {
