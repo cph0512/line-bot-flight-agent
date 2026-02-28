@@ -72,8 +72,11 @@ function convertToolsToGemini(tools) {
     }
     return decl;
   });
-  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")}`);
-  return [{ functionDeclarations: declarations }];
+  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")} + googleSearchRetrieval`);
+  return [
+    { functionDeclarations: declarations },
+    { googleSearchRetrieval: {} },  // Google 原生搜尋：讓 Gemini 自動上網查資料
+  ];
 }
 
 const geminiTools = genAI ? convertToolsToGemini(anthropicTools) : null;

@@ -180,6 +180,18 @@ app.get("/debug/calendar", async (req, res) => {
   res.json(info);
 });
 
+// ========== 搜尋測試端點 ==========
+app.get("/debug/search", async (req, res) => {
+  const query = req.query.q || "台積電股價";
+  const { webSearchService } = require("./services");
+  try {
+    const result = await webSearchService.searchWeb(query, 3);
+    res.json({ query, success: true, textLength: result.text?.length, text: result.text });
+  } catch (e) {
+    res.json({ query, success: false, error: e.message });
+  }
+});
+
 // ========== LINE Webhook（必須放在 express.json() 之前！）==========
 // LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
 // 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
