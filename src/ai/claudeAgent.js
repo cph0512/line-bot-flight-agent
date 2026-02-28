@@ -328,7 +328,9 @@ async function runGeminiLoop(history) {
       const groundingChunks = grounding?.groundingChunks || [];
       const wasGrounded = groundingChunks.length > 0;
 
-      logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text} grounded=${wasGrounded} searchQueries=${JSON.stringify(searchQueries)}`);
+      // 記錄 token 用量
+      const gemUsage = response.usageMetadata || {};
+      logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text} grounded=${wasGrounded} searchQueries=${JSON.stringify(searchQueries)} | tokens: in=${gemUsage.promptTokenCount || "?"} out=${gemUsage.candidatesTokenCount || "?"} total=${gemUsage.totalTokenCount || "?"}`);
 
       if (functionCalls.length === 0) {
         let text = response.text || "抱歉，我不太理解。試試：「台灣新聞」「台北天氣」「晨報」";
@@ -403,7 +405,9 @@ async function runAnthropicLoop(history) {
         messages,
       });
 
-      logger.info(`[AI] Anthropic 回應: stop_reason=${res.stop_reason}`);
+      // 記錄 token 用量
+      const usage = res.usage || {};
+      logger.info(`[AI] Anthropic 回應: stop_reason=${res.stop_reason} | tokens: in=${usage.input_tokens || "?"} out=${usage.output_tokens || "?"} total=${(usage.input_tokens || 0) + (usage.output_tokens || 0)}`);
 
       if (res.stop_reason === "end_turn") {
         const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
