@@ -67,16 +67,17 @@ function parseRssXml(xml, count) {
     const sourceMatch = item.match(/<source[^>]*>(.*?)<\/source>/) || item.match(/<source[^>]*><!\[CDATA\[(.*?)\]\]><\/source>/);
     const source = sourceMatch ? (sourceMatch[1] || "").trim() : "";
 
-    // 優先從 <source url="..."> 取得真正的文章連結
-    const sourceUrlMatch = item.match(/<source[^>]+url=["']([^"']+)["']/);
-    const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1].trim() : "";
-
-    // 退而求其次用 <link>（Google News redirect URL）
+    // <link> 是 Google News 轉址 URL（會導向真正文章）
     const linkMatch = item.match(/<link>(.*?)<\/link>/) || item.match(/<link><!\[CDATA\[(.*?)\]\]><\/link>/);
     const rawLink = linkMatch ? (linkMatch[1] || "").trim() : "";
 
-    // 使用真正的文章連結，避免 Google News redirect URL
-    const link = sourceUrl || rawLink;
+    // <source url="..."> 只是新聞來源的首頁（例如 https://udn.com），不是文章連結
+    // 只在 <link> 不存在時才 fallback
+    const sourceUrlMatch = item.match(/<source[^>]+url=["']([^"']+)["']/);
+    const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1].trim() : "";
+
+    // 優先使用 <link>（實際文章連結），<source url> 只是首頁
+    const link = rawLink || sourceUrl;
 
     const pubDateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/);
     const pubDate = pubDateMatch ? pubDateMatch[1].trim() : "";
