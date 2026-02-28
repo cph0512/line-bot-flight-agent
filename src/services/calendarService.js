@@ -22,8 +22,18 @@ function getAuth() {
 
   if (keyJson) {
     // Railway / 雲端部署：直接從環境變數讀取 JSON 金鑰內容
+    // Railway 會把 private_key 中的 \\n 轉成真實換行，需要修復回來
     try {
-      const credentials = JSON.parse(keyJson);
+      let cleaned = keyJson;
+      // 如果 JSON.parse 直接失敗，嘗試修復換行問題
+      let credentials;
+      try {
+        credentials = JSON.parse(cleaned);
+      } catch {
+        // 把 private_key 欄位內的真實換行修復為 \\n
+        cleaned = cleaned.replace(/\n/g, "\\n");
+        credentials = JSON.parse(cleaned);
+      }
       authClient = new google.auth.GoogleAuth({
         credentials,
         scopes: ["https://www.googleapis.com/auth/calendar"],

@@ -126,10 +126,17 @@ app.get("/debug/calendar", async (req, res) => {
     isAvailable: calendarService.isAvailable(),
   };
 
-  // 嘗試解析 JSON
+  // 嘗試解析 JSON（Railway 可能把 \n 變成真實換行）
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
     try {
-      const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+      let raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = JSON.parse(raw.replace(/\n/g, "\\n"));
+        info.fixedNewlines = true;
+      }
       info.jsonParse = "OK";
       info.client_email = parsed.client_email || "missing";
       info.project_id = parsed.project_id || "missing";
