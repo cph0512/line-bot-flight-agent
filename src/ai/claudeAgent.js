@@ -73,7 +73,10 @@ function convertToolsToGemini(tools) {
     return decl;
   });
   logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")}`);
-  return [{ functionDeclarations: declarations }];
+  return [
+    { functionDeclarations: declarations },
+    { googleSearch: {} },  // Google Search grounding：讓 Gemini 自動搜尋網路
+  ];
 }
 
 const geminiTools = genAI ? convertToolsToGemini(anthropicTools) : null;
@@ -88,17 +91,22 @@ function getSystemPrompt() {
   return `你是 LINE 全能家庭 AI 管家。用繁體中文回覆，語氣親切，善用 emoji，回覆簡潔適合手機閱讀。
 今天：${today}。日期沒年份預設 ${year} 年，已過就用 ${year + 1} 年。
 
-重要：你只能使用工具回傳的資料，絕對不可編造任何資訊。
+你有三種能力：
+1. 專用工具：機票查詢、天氣、新聞、行事曆、晨報（用下面的工具）
+2. Google 搜尋：遇到你不確定的事實、即時資訊、推薦餐廳景點等，自動上網搜尋
+3. 一般聊天：日常對話、問答、建議、翻譯、計算等直接回覆
 
-## 工具使用規則
-- 使用者問機票/航班/比價 → 呼叫 search_all_flights（預設出發 TPE）
-- 使用者問天氣/溫度/下雨 → 呼叫 get_weather
-- 使用者問新聞（台灣/國際/科技/財經等）→ 呼叫 get_news
-- 使用者問行程/行事曆 → 呼叫 get_events
-- 使用者說早報/晨報/今日摘要/每日簡報 → 呼叫 trigger_briefing
-- 使用者說加行程/新增會議 → 呼叫 add_event
-- 使用者說改行程 → 先 get_events 再 update_event
-- 使用者說刪行程/取消 → 先 get_events 再 delete_event
+重要：航班價格、天氣數據等必須使用工具取得，不可編造。一般知識問答可以直接回覆。
+
+## 專用工具使用規則
+- 機票/航班/比價 → search_all_flights（預設出發 TPE）
+- 天氣/溫度/下雨 → get_weather
+- 新聞（台灣/國際/科技/財經等）→ get_news
+- 行程/行事曆 → get_events
+- 早報/晨報/今日摘要/每日簡報 → trigger_briefing
+- 加行程/新增會議 → add_event
+- 改行程 → 先 get_events 再 update_event
+- 刪行程/取消 → 先 get_events 再 delete_event
 
 ## 航班回覆格式
 系統自動產生 Flex 卡片，你只做分析摘要。不要用 markdown 表格。格式：
