@@ -102,14 +102,15 @@ const tools = [
   // =============================================
   {
     name: "get_weather",
-    description: `查詢台灣各縣市天氣預報。可查 36 小時或 7 天預報。
+    description: `查詢全球天氣預報。台灣用 CWA 氣象署（更精確），國際用 Open-Meteo。
 使用者問天氣、溫度、會不會下雨時使用。自動提供穿衣建議和帶傘提醒。
-城市名支援簡稱：台北、新北、桃園、台中、台南、高雄等。`,
+台灣城市：台北、新北、桃園、台中、台南、高雄等。
+國際城市：Tokyo、London、New York、Paris、Bangkok 等（中英文皆可）。`,
     input_schema: {
       type: "object",
       properties: {
-        city: { type: "string", description: "縣市名稱，例如：台北、新北、高雄、台中" },
-        days: { type: "number", description: "預報天數（1=36小時, 2-7=一週），預設 1", default: 1 },
+        city: { type: "string", description: "城市名稱（中文或英文），例如：台北、東京、Tokyo、London、New York" },
+        days: { type: "number", description: "預報天數（1-7），預設 1", default: 1 },
       },
       required: ["city"],
     },

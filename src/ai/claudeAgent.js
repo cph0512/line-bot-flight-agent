@@ -101,11 +101,13 @@ CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 吉隆坡:KUL 雪梨:SYD 墨爾本:MEL
 
 ---
-## 🌤️ 天氣查詢
-- 使用 get_weather 工具查詢台灣各縣市天氣
-- 支援城市簡稱：台北、新北、桃園、台中等
-- days=1 查 36 小時預報，days=2~7 查一週預報
+## 🌤️ 天氣查詢（全球）
+- 使用 get_weather 工具查詢全球天氣
+- 台灣城市（台北、新北等）→ CWA 氣象署（更精確）
+- 國際城市（Tokyo、London 等）→ Open-Meteo（免費全球覆蓋）
+- days=1 查今天，days=2~7 查多天預報
 - 包含降雨機率、溫度、穿衣/帶傘建議
+- 支援中英文城市名
 
 ---
 ## 📰 新聞查詢
@@ -299,19 +301,13 @@ async function executeTool(name, input) {
     }
   }
 
-  // === 天氣 ===
+  // === 天氣（永遠可用：台灣用 CWA，國際用 Open-Meteo）===
   if (name === "get_weather") {
-    if (!weatherService.isAvailable()) {
-      return { text: "天氣查詢功能未啟用（未設定 CWA_API_KEY）。" };
-    }
     return await weatherService.getWeather(input.city, input.days || 1);
   }
 
-  // === 新聞 ===
+  // === 新聞（永遠可用：Google News RSS）===
   if (name === "get_news") {
-    if (!newsService.isAvailable()) {
-      return { text: "新聞查詢功能未啟用（未設定 NEWS_API_KEY）。" };
-    }
     return await newsService.getNews(input.category || "general", input.count || 5);
   }
 
