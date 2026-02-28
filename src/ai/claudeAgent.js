@@ -72,10 +72,10 @@ function convertToolsToGemini(tools) {
     }
     return decl;
   });
-  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")} + googleSearchRetrieval`);
+  logger.info(`[AI] Gemini 工具: ${declarations.map(d => d.name).join(", ")} + googleSearch`);
   return [
     { functionDeclarations: declarations },
-    { googleSearchRetrieval: {} },  // Google 原生搜尋：讓 Gemini 自動上網查資料
+    { googleSearch: {} },  // Google 原生搜尋（Gemini 2.5 API 已改用 googleSearch）
   ];
 }
 
