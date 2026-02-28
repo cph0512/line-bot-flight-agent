@@ -33,7 +33,40 @@ const config = {
     port: process.env.PORT || 3000,
     nodeEnv: process.env.NODE_ENV || "development",
   },
+  // 氣象署 CWA Open Data API（選填）
+  cwa: {
+    apiKey: process.env.CWA_API_KEY,
+  },
+  // NewsAPI（選填）
+  news: {
+    apiKey: process.env.NEWS_API_KEY,
+  },
+  // Google Calendar（選填）
+  calendar: {
+    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
+    calendarId: process.env.GOOGLE_CALENDAR_ID,
+    familyCalendars: parseFamilyCalendars(process.env.FAMILY_CALENDARS),
+  },
+  // 每日晨報（選填）
+  briefing: {
+    time: process.env.MORNING_BRIEFING_TIME || "07:00",
+    timezone: process.env.TZ || "Asia/Taipei",
+    recipients: (process.env.BRIEFING_RECIPIENTS || "").split(",").filter(Boolean),
+    defaultCity: process.env.DEFAULT_CITY || "臺北市",
+  },
 };
+
+/**
+ * 解析家庭行事曆設定
+ * 格式: "名稱:calendarId,名稱:calendarId"
+ */
+function parseFamilyCalendars(str) {
+  if (!str) return [];
+  return str.split(",").map((pair) => {
+    const [name, id] = pair.split(":").map((s) => s.trim());
+    return { name, id };
+  }).filter((c) => c.name && c.id);
+}
 
 // 檢查是否為佔位符值
 function isPlaceholder(val) {
@@ -78,6 +111,16 @@ function validateConfig() {
     .map(([k]) => k);
   if (noMileage.length > 0) {
     console.log(`[Config] 未設定里程帳號：${noMileage.join(", ")}（只能查現金票）`);
+  }
+
+  // 選填模組狀態
+  console.log(`[Config] CWA 天氣: ${config.cwa.apiKey ? "已設定" : "未設定（天氣功能停用）"}`);
+  console.log(`[Config] NewsAPI: ${config.news.apiKey ? "已設定" : "未設定（新聞功能停用）"}`);
+  console.log(`[Config] Google Calendar: ${config.calendar.keyFile ? "已設定" : "未設定（行事曆功能停用）"}`);
+  if (config.briefing.recipients.length > 0) {
+    console.log(`[Config] 每日晨報: ${config.briefing.time} → ${config.briefing.recipients.length} 位接收者`);
+  } else {
+    console.log(`[Config] 每日晨報: 未設定接收者（晨報功能停用）`);
   }
 }
 

@@ -6,6 +6,7 @@ const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
 const flightApi = require("./api/flightApi");
+const { weatherService, newsService, calendarService, briefingService } = require("./services");
 const logger = require("./utils/logger");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
@@ -29,10 +30,14 @@ const app = express();
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    name: "LINE Bot 智能機票助手 (Amadeus + RPA)",
+    name: "LINE 全能家庭 AI 管家 v3",
     uptime: Math.round(process.uptime()) + "s",
     memory: Math.round(process.memoryUsage().rss / 1024 / 1024) + "MB",
     amadeus: amadeusClient.isAvailable() ? "configured" : "not configured",
+    weather: weatherService.isAvailable() ? "enabled" : "disabled",
+    news: newsService.isAvailable() ? "enabled" : "disabled",
+    calendar: calendarService.isAvailable() ? "enabled" : "disabled",
+    briefing: briefingService.isAvailable() ? "enabled" : "disabled",
   });
 });
 
@@ -99,6 +104,14 @@ app.get("/health", async (req, res) => {
     report.browser = `FAIL: ${e.message}`;
   }
 
+  // 5. 選填模組狀態
+  report.modules = {
+    weather: weatherService.isAvailable() ? "enabled" : "disabled (no CWA_API_KEY)",
+    news: newsService.isAvailable() ? "enabled" : "disabled (no NEWS_API_KEY)",
+    calendar: calendarService.isAvailable() ? "enabled" : "disabled (no Google Calendar config)",
+    briefing: briefingService.isAvailable() ? "enabled" : "disabled (no BRIEFING_RECIPIENTS)",
+  };
+
   const allOk = !JSON.stringify(report).includes("FAIL") && !JSON.stringify(report).includes("MISSING");
   res.status(allOk ? 200 : 500).json(report);
 });
@@ -139,7 +152,7 @@ app.use((err, req, res, next) => {
 // ========== 啟動 ==========
 app.listen(config.server.port, () => {
   console.log("\n" + "=".repeat(55));
-  console.log("  LINE Bot 智能機票助手（Amadeus + RPA 版）已啟動");
+  console.log("  LINE 全能家庭 AI 管家 v3 已啟動");
   console.log("=".repeat(55));
   console.log(`  Server:   http://localhost:${config.server.port}`);
   console.log(`  Webhook:  /webhook`);
@@ -149,8 +162,18 @@ app.listen(config.server.port, () => {
   console.log(`  AI Model: ${config.anthropic.model}`);
   console.log(`  Amadeus:  ${amadeusClient.isAvailable() ? "✅ 已設定" : "❌ 未設定（將使用 RPA）"}`);
   console.log(`  Browser:  Headless=${config.browser.headless}, MaxPages=${config.browser.maxPages}`);
+  console.log("  " + "-".repeat(53));
+  console.log(`  天氣:     ${weatherService.isAvailable() ? "✅ CWA 已設定" : "⬜ 未設定"}`);
+  console.log(`  新聞:     ${newsService.isAvailable() ? "✅ NewsAPI 已設定" : "⬜ 未設定"}`);
+  console.log(`  行事曆:   ${calendarService.isAvailable() ? "✅ Google Calendar 已設定" : "⬜ 未設定"}`);
+  console.log(`  晨報:     ${briefingService.isAvailable() ? "✅ " + config.briefing.time + " → " + config.briefing.recipients.length + " 位" : "⬜ 未設定"}`);
   console.log("=".repeat(55));
   console.log("  支援航空: CI / BR / JX / EK / TK / CX / SQ\n");
+
+  // 啟動晨報排程
+  if (briefingService.isAvailable()) {
+    briefingService.initCron();
+  }
 });
 
 // 優雅關閉

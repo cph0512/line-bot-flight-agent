@@ -1,10 +1,11 @@
 // =============================================
-// AI 工具定義（RPA 版）
+// AI 工具定義（全能管家版 v3）
 // Claude 可以使用的工具，包含：
-// - 航空公司官網查現金票
-// - 航空公司官網查里程票
-// - 完整比價（現金+里程）
-// - 取得訂票連結
+// - 航班查詢與比價（4 個）
+// - 天氣查詢（1 個）
+// - 新聞查詢（1 個）
+// - 行事曆管理（4 個）
+// - 每日晨報（1 個）
 // =============================================
 
 const tools = [
@@ -94,6 +95,121 @@ const tools = [
         adults: { type: "number", default: 1 },
       },
       required: ["origin", "destination", "departDate"],
+    },
+  },
+  // =============================================
+  // 天氣
+  // =============================================
+  {
+    name: "get_weather",
+    description: `查詢台灣各縣市天氣預報。可查 36 小時或 7 天預報。
+使用者問天氣、溫度、會不會下雨時使用。自動提供穿衣建議和帶傘提醒。
+城市名支援簡稱：台北、新北、桃園、台中、台南、高雄等。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        city: { type: "string", description: "縣市名稱，例如：台北、新北、高雄、台中" },
+        days: { type: "number", description: "預報天數（1=36小時, 2-7=一週），預設 1", default: 1 },
+      },
+      required: ["city"],
+    },
+  },
+
+  // =============================================
+  // 新聞
+  // =============================================
+  {
+    name: "get_news",
+    description: `查詢台灣即時新聞。支援分類：general(綜合)、business(財經)、technology(科技)、sports(體育)、entertainment(娛樂)、health(健康)、science(科學)。
+使用者問最新新聞、今天新聞時使用。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ["general", "business", "technology", "sports", "entertainment", "health", "science"],
+          description: "新聞分類，預設 general",
+        },
+        count: { type: "number", description: "新聞筆數（1-10），預設 5", default: 5 },
+      },
+    },
+  },
+
+  // =============================================
+  // 行事曆
+  // =============================================
+  {
+    name: "get_events",
+    description: `查詢 Google 行事曆事件。可查個人或家庭成員行事曆。
+使用者問今天行程、這週有什麼事、明天行事曆時使用。
+回傳結果包含 eventId，可用於 update_event / delete_event。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        calendarName: { type: "string", description: "行事曆名稱（空=個人、「全家」=全部家人）" },
+        startDate: { type: "string", description: "開始日期 YYYY-MM-DD，預設今天" },
+        endDate: { type: "string", description: "結束日期 YYYY-MM-DD，預設同 startDate" },
+      },
+    },
+  },
+  {
+    name: "add_event",
+    description: `新增 Google 行事曆事件。會自動偵測時間衝突。
+使用者說「幫我加一個會議」「新增行程」時使用。
+全天事件用 YYYY-MM-DD 格式，有時間的事件用 YYYY-MM-DDTHH:mm:ss。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        calendarName: { type: "string", description: "行事曆名稱（空=個人行事曆）" },
+        summary: { type: "string", description: "事件標題" },
+        startTime: { type: "string", description: "開始時間 YYYY-MM-DDTHH:mm:ss 或 YYYY-MM-DD" },
+        endTime: { type: "string", description: "結束時間 YYYY-MM-DDTHH:mm:ss 或 YYYY-MM-DD" },
+        description: { type: "string", description: "事件說明（選填）" },
+      },
+      required: ["summary", "startTime", "endTime"],
+    },
+  },
+  {
+    name: "update_event",
+    description: `更新 Google 行事曆事件。需要 eventId（從 get_events 取得）。
+使用者說「改時間」「更新會議」時，先用 get_events 查到 eventId 再更新。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        eventId: { type: "string", description: "事件 ID（從 get_events 結果取得）" },
+        calendarName: { type: "string", description: "行事曆名稱" },
+        summary: { type: "string", description: "新標題（選填）" },
+        startTime: { type: "string", description: "新開始時間（選填）" },
+        endTime: { type: "string", description: "新結束時間（選填）" },
+        description: { type: "string", description: "新說明（選填）" },
+      },
+      required: ["eventId"],
+    },
+  },
+  {
+    name: "delete_event",
+    description: `刪除 Google 行事曆事件。需要 eventId（從 get_events 取得）。
+使用者說「取消會議」「刪除行程」時，先用 get_events 查到 eventId 再刪。`,
+    input_schema: {
+      type: "object",
+      properties: {
+        eventId: { type: "string", description: "事件 ID" },
+        calendarName: { type: "string", description: "行事曆名稱" },
+      },
+      required: ["eventId"],
+    },
+  },
+
+  // =============================================
+  // 每日晨報
+  // =============================================
+  {
+    name: "trigger_briefing",
+    description: `手動觸發每日早報。整合天氣、今日行程、新聞摘要一次推送。
+使用者說「早報」「今日摘要」「每日簡報」「給我今天的摘要」時使用。`,
+    input_schema: {
+      type: "object",
+      properties: {},
     },
   },
 ];
