@@ -52,6 +52,10 @@ const config = {
     calendarId: process.env.GOOGLE_CALENDAR_ID,
     familyCalendars: parseFamilyCalendars(process.env.FAMILY_CALENDARS),
   },
+  // RapidAPI（Google Flights 搜尋）
+  rapidapi: {
+    key: process.env.RAPIDAPI_KEY,
+  },
   // 每日晨報（選填）
   briefing: {
     time: process.env.MORNING_BRIEFING_TIME || "07:00",
@@ -147,6 +151,7 @@ function validateConfig() {
   }
 
   // 選填模組狀態
+  console.log(`[Config] RapidAPI (Google Flights): ${config.rapidapi.key ? "已設定" : "未設定（Google Flights 搜尋停用）"}`);
   console.log(`[Config] CWA 天氣: ${config.cwa.apiKey ? "已設定" : "未設定（天氣功能停用）"}`);
   console.log(`[Config] NewsAPI: ${config.news.apiKey ? "已設定" : "未設定（新聞功能停用）"}`);
   console.log(`[Config] Google Calendar: ${config.calendar.keyFile ? "已設定" : "未設定（行事曆功能停用）"}`);

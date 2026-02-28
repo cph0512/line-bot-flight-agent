@@ -15,7 +15,7 @@ const {
   formatResultsForAI,
   getBookingLinks,
 } = require("../scraper/scraperEngine");
-const { weatherService, newsService, calendarService, briefingService, webSearchService } = require("../services");
+const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService } = require("../services");
 const logger = require("../utils/logger");
 
 // ========== AI Client 初始化（兩個都初始化）==========
@@ -110,7 +110,9 @@ function getSystemPrompt() {
 絕對不可以自己編一個看起來合理的數字。
 
 ## 工具使用規則
-- 機票/航班/比價 → search_all_flights（預設出發 TPE）
+- 機票/航班/比價 → 優先用 search_google_flights（Google Flights 即時票價），查不到再用 search_all_flights（Amadeus）
+- 不確定機場代碼 → search_airport（用城市名找代碼）
+- 找最便宜日期/彈性日期 → get_flight_prices（價格日曆）
 - 天氣/溫度/下雨 → get_weather
 - 新聞（台灣/國際/科技/財經等）→ get_news
 - 行程/行事曆 → get_events
@@ -134,7 +136,7 @@ function getSystemPrompt() {
 📊 其他：
 2️⃣ 航空 航班號 | 時間 | NT$票價
 
-⚠️ 票價來自 Amadeus API，僅供參考，實際價格請以航空公司官網為準。
+⚠️ 票價來自 Google Flights / Amadeus，僅供參考，實際價格請以航空公司官網為準。
 
 每次航班回覆最後都必須加上這行提醒。
 
@@ -535,6 +537,57 @@ async function executeTool(name, input) {
       return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };
     } catch (e) {
       return { text: `晨報推送失敗：${e.message}` };
+    }
+  }
+
+  // ====== Google Flights 工具 ======
+  if (name === "search_google_flights") {
+    if (!googleFlightsService.isAvailable()) {
+      return { text: "Google Flights 搜尋未啟用（未設定 RAPIDAPI_KEY）。可改用 search_all_flights 查詢 Amadeus 資料。" };
+    }
+    try {
+      const result = await googleFlightsService.searchFlights({
+        origin: input.origin,
+        destination: input.destination,
+        departDate: input.departDate,
+        returnDate: input.returnDate || null,
+        adults: input.adults || 1,
+        children: input.children || 0,
+        cabinClass: input.cabinClass || "ECONOMY",
+      });
+      return { text: result.text, flights: result.flights || [] };
+    } catch (e) {
+      logger.error(`[Tool] search_google_flights 失敗: ${e.message}`);
+      return { text: `Google Flights 搜尋失敗：${e.message}。可改用 search_all_flights 查詢。` };
+    }
+  }
+
+  if (name === "search_airport") {
+    if (!googleFlightsService.isAvailable()) {
+      return { text: "機場搜尋未啟用（未設定 RAPIDAPI_KEY）。常用代碼：TPE=桃園, NRT=東京成田, KIX=大阪關西, ICN=首爾仁川, BKK=曼谷" };
+    }
+    try {
+      return await googleFlightsService.searchAirport(input.query);
+    } catch (e) {
+      logger.error(`[Tool] search_airport 失敗: ${e.message}`);
+      return { text: `機場搜尋失敗：${e.message}` };
+    }
+  }
+
+  if (name === "get_flight_prices") {
+    if (!googleFlightsService.isAvailable()) {
+      return { text: "價格日曆未啟用（未設定 RAPIDAPI_KEY）。" };
+    }
+    try {
+      return await googleFlightsService.getPriceCalendar({
+        origin: input.origin,
+        destination: input.destination,
+        departDate: input.departDate,
+        returnDate: input.returnDate || null,
+      });
+    } catch (e) {
+      logger.error(`[Tool] get_flight_prices 失敗: ${e.message}`);
+      return { text: `價格日曆查詢失敗：${e.message}` };
     }
   }
 

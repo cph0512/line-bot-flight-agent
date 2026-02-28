@@ -190,6 +190,52 @@ const tools = [
     },
   },
   {
+    name: "search_google_flights",
+    description: "用 Google Flights 搜尋即時航班票價。搜機票比價時優先使用，資料來自 Google Flights，票價最即時。",
+    input_schema: {
+      type: "object",
+      properties: {
+        origin: { type: "string", description: "出發機場 IATA 代碼，例如 TPE" },
+        destination: { type: "string", description: "目的地機場 IATA 代碼，例如 NRT" },
+        departDate: { type: "string", description: "出發日期 YYYY-MM-DD" },
+        returnDate: { type: "string", description: "回程日期 YYYY-MM-DD（單程不填）" },
+        adults: { type: "integer", description: "成人人數，預設 1" },
+        children: { type: "integer", description: "兒童人數 (2-11歲)，預設 0" },
+        cabinClass: {
+          type: "string",
+          enum: ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"],
+          description: "艙等：ECONOMY=經濟, PREMIUM_ECONOMY=豪經, BUSINESS=商務, FIRST=頭等",
+        },
+      },
+      required: ["origin", "destination", "departDate"],
+    },
+  },
+  {
+    name: "search_airport",
+    description: "搜尋機場代碼。使用者說城市名但不確定機場代碼時使用，例如「大阪」找到 KIX/ITM。",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "城市名或機場名稱，例如：大阪、Bangkok、LAX" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_flight_prices",
+    description: "查詢航班價格日曆，找出最便宜的出發日期。適合彈性日期的使用者。",
+    input_schema: {
+      type: "object",
+      properties: {
+        origin: { type: "string", description: "出發機場 IATA 代碼" },
+        destination: { type: "string", description: "目的地機場 IATA 代碼" },
+        departDate: { type: "string", description: "預計出發日期 YYYY-MM-DD（會顯示前後日期的價格）" },
+        returnDate: { type: "string", description: "預計回程日期 YYYY-MM-DD" },
+      },
+      required: ["origin", "destination", "departDate"],
+    },
+  },
+  {
     name: "search_web",
     description: "上網搜尋即時資訊。當使用者問的問題需要最新資料時使用，例如：股價、賽程、活動時間、餐廳推薦、任何你不確定的事實。優先使用此工具查詢，不要自己猜測。",
     input_schema: {
