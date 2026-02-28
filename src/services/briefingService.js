@@ -1,5 +1,5 @@
 // =============================================
-// 每日晨報服務 v2
+// 每日晨報服務 v3 — 精簡排版
 //
 // 使用 node-cron 排程，每天指定時間推播
 // 支援：多城市天氣 + 今日行程 + 多區域/分類新聞
@@ -67,7 +67,6 @@ async function triggerBriefing() {
   const cities = config.briefing.cities;
   const newsSections = config.briefing.newsSections;
 
-  // 天氣：多城市並行
   const weatherPromises = cities.map((city) =>
     weatherService.getWeather(city, 1).catch((e) => {
       logger.warn(`[Briefing] ${city} 天氣取得失敗: ${e.message}`);
@@ -75,12 +74,13 @@ async function triggerBriefing() {
     })
   );
 
-  // 行程
   const eventsPromise = calendarService.isAvailable()
-    ? calendarService.getEvents(null, dateStr, dateStr).catch(() => null)
+    ? calendarService.getEvents(null, dateStr, dateStr).catch((e) => {
+        logger.warn(`[Briefing] 行事曆查詢失敗: ${e.message}`);
+        return null;
+      })
     : Promise.resolve(null);
 
-  // 新聞：多區塊並行
   const newsPromises = newsSections.map((section) =>
     newsService.getNews(section.category, section.count, section.region).catch((e) => {
       logger.warn(`[Briefing] ${section.region}:${section.category} 新聞取得失敗: ${e.message}`);
@@ -88,82 +88,78 @@ async function triggerBriefing() {
     })
   );
 
-  // 全部並行
   const [weatherResults, eventsResult, ...newsResults] = await Promise.all([
     Promise.all(weatherPromises),
     eventsPromise,
     ...newsPromises,
   ]);
 
-  // === 組合晨報 ===
-  let briefing = `☀️ 早安！今天是 ${dayLabel}\n`;
-  briefing += "━".repeat(18) + "\n";
+  // === 組合晨報（精簡版）===
+  let b = `☀️ 早安！${dayLabel}\n`;
 
-  // --- 天氣（多城市）---
-  briefing += "\n🌤️ 今日天氣\n";
+  // 天氣
+  b += "\n🌤️ 天氣\n";
   for (let i = 0; i < cities.length; i++) {
     const weather = weatherResults[i];
     if (weather && weather.text) {
-      briefing += `\n📍 ${cities[i]}\n`;
       const lines = weather.text.split("\n").filter((l) => l.trim() && !l.startsWith("==="));
-      // 提取關鍵資訊：溫度、天氣、降雨
-      for (const line of lines.slice(0, 5)) {
-        if (line.includes("溫度") || line.includes("天氣") || line.includes("降雨") || line.includes("°") || line.includes("建議")) {
-          briefing += `  ${line.trim()}\n`;
+      const info = [];
+      for (const line of lines.slice(0, 6)) {
+        const t = line.trim();
+        if (t.includes("溫度") || t.includes("天氣") || t.includes("降雨") || t.includes("°") || t.includes("現在")) {
+          info.push(t);
         }
       }
+      b += `📍${cities[i]}：${info.join(" | ") || "查詢中"}\n`;
     } else {
-      briefing += `\n📍 ${cities[i]}：查詢失敗\n`;
+      b += `📍${cities[i]}：查詢失敗\n`;
     }
   }
 
-  // --- 行程 ---
-  if (eventsResult && eventsResult.text) {
-    briefing += "\n━".repeat(18) + "\n";
-    briefing += "\n📅 今日行程\n";
-    const eventLines = eventsResult.text.split("\n").filter(
-      (l) => l.trim() && !l.startsWith("===") && !l.startsWith("共") && !l.includes("eventId:")
-    );
-    if (eventLines.length > 0) {
-      briefing += eventLines.join("\n") + "\n";
+  // 行程（只在有行事曆功能時顯示）
+  if (calendarService.isAvailable()) {
+    b += "\n📅 行程\n";
+    if (eventsResult && eventsResult.text) {
+      const eventLines = eventsResult.text.split("\n").filter(
+        (l) => l.trim() && !l.startsWith("===") && !l.startsWith("共") && !l.includes("eventId:")
+      );
+      if (eventLines.length > 0) {
+        b += eventLines.join("\n") + "\n";
+      } else {
+        b += "今天沒有行程 🎉\n";
+      }
     } else {
-      briefing += "今天沒有行程 🎉\n";
+      b += "今天沒有行程 🎉\n";
     }
   }
 
-  // --- 新聞（多區塊）---
-  briefing += "\n━".repeat(18) + "\n";
-  briefing += "\n📰 今日新聞\n";
-
+  // 新聞
+  b += "\n📰 新聞\n";
   for (let i = 0; i < newsSections.length; i++) {
     const section = newsSections[i];
     const news = newsResults[i];
-    const regionLabel = section.region === "world" ? "🌍 國際" : "🇹🇼 台灣";
+    const regionLabel = section.region === "world" ? "🌍" : "🇹🇼";
     const catLabel = CATEGORY_NAMES[section.category] || section.category;
 
-    briefing += `\n${regionLabel}${catLabel}：\n`;
+    b += `${regionLabel} ${catLabel}：\n`;
 
     if (news && news.text) {
       const lines = news.text.split("\n").filter((l) => l.trim() && !l.startsWith("===") && !l.startsWith("共"));
       let count = 0;
       for (const line of lines) {
-        // 提取標題行（數字開頭的行）
         const titleMatch = line.match(/^\d+\.\s*(.+)/);
         if (titleMatch) {
           count++;
-          briefing += `  ${count}. ${titleMatch[1].trim()}\n`;
+          b += `${count}. ${titleMatch[1].trim()}\n`;
         }
       }
-      if (count === 0) {
-        briefing += "  暫無新聞\n";
-      }
+      if (count === 0) b += "暫無新聞\n";
     } else {
-      briefing += "  查詢失敗\n";
+      b += "查詢失敗\n";
     }
   }
 
-  briefing += "\n━".repeat(18);
-  briefing += "\n祝你有美好的一天！ 🎉";
+  b += "\n祝你有美好的一天！🎉";
 
   // === 推播 ===
   const recipients = config.briefing.recipients || [];
@@ -173,7 +169,7 @@ async function triggerBriefing() {
     try {
       await lineClient.pushMessage({
         to: userId.trim(),
-        messages: [{ type: "text", text: briefing }],
+        messages: [{ type: "text", text: b }],
       });
       sentCount++;
       logger.info(`[Briefing] 已推播給 ${userId.slice(-6)}`);
@@ -184,7 +180,7 @@ async function triggerBriefing() {
 
   logger.info(`[Briefing] 晨報完成: ${sentCount}/${recipients.length} 人`);
 
-  return { text: `早報已發送給 ${sentCount} 位接收者。\n\n${briefing}` };
+  return { text: `早報已發送給 ${sentCount} 位接收者。\n\n${b}` };
 }
 
 module.exports = { isAvailable, initCron, triggerBriefing };
