@@ -93,7 +93,10 @@ function getSystemPrompt() {
 2. 網路搜尋：用 search_web 工具上網查即時資訊（股價、賽程、推薦、任何你不確定的事）
 3. 一般聊天：日常對話、問答、建議、翻譯、計算
 
-重要規則：當你不確定答案或需要即時資訊時，一定要先呼叫 search_web 搜尋，不要自己猜。
+重要規則：
+- 當訊息中附有「網路搜尋結果」，你必須根據搜尋結果回覆，不可以說「查不到」。
+- 當你不確定答案或需要即時資訊時，呼叫 search_web 搜尋，不要自己猜。
+- 搜尋結果若有數據，直接引用；若搜尋結果不相關，才說「目前查不到確切資訊」。
 
 ⚠️ 絕對禁止編造的資料（違反會失去使用者信任）：
 - 股價、匯率、基金淨值等金融數據
@@ -154,6 +157,24 @@ function getSystemPrompt() {
 const conversations = new Map();
 const MAX_HISTORY = 20;
 
+// ========== 自動搜尋偵測 ==========
+// 偵測需要即時資訊的關鍵字，自動先搜尋再給 AI
+const SEARCH_PATTERNS = [
+  /股價|股票|漲停|跌停|收盤|開盤|市值|殖利率|本益比/,
+  /匯率|換算|美金|日幣|歐元|匯價/,
+  /賽程|比賽|開幕|冠軍|世界盃|WBC|奧運|世錦賽|MLB|NBA|英超/,
+  /推薦.{0,4}(餐廳|美食|小吃|咖啡)|餐廳.{0,4}推薦|好吃/,
+  /推薦.{0,4}(景點|旅遊|飯店|住宿)|景點.{0,4}推薦|好玩/,
+  /多少錢|價格|售價|費用|票價|門票/,
+  /營業時間|幾點開|幾點關|地址|怎麼去|怎麼走/,
+  /電影.*上映|上映.*電影|院線|檔期/,
+  /演唱會|展覽|活動.*時間|時間.*活動/,
+];
+
+function needsWebSearch(message) {
+  return SEARCH_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 /**
  * 處理使用者訊息 - 主入口（自動切換引擎）
  */
@@ -166,6 +187,26 @@ async function handleMessage(userId, userMessage) {
   while (history.length > MAX_HISTORY) history.shift();
 
   try {
+    // ====== 自動搜尋：偵測到即時資訊需求，先搜再給 AI ======
+    let searchHint = "";
+    if (needsWebSearch(userMessage)) {
+      try {
+        logger.info(`[AI] 🔍 偵測到即時資訊需求，自動搜尋: "${userMessage}"`);
+        const searchResult = await webSearchService.searchWeb(userMessage, 5);
+        if (searchResult?.text) {
+          searchHint = `\n\n[以下是網路搜尋結果，請根據這些資料回覆使用者，不要說「查不到」：]\n${searchResult.text}`;
+          logger.info(`[AI] 🔍 自動搜尋完成，結果 ${searchResult.text.length} 字`);
+        }
+      } catch (e) {
+        logger.warn(`[AI] 🔍 自動搜尋失敗: ${e.message}`);
+      }
+    }
+
+    // 暫時把搜尋結果附加到使用者訊息，讓 AI 看到
+    if (searchHint) {
+      history[history.length - 1].content = userMessage + searchHint;
+    }
+
     // 決定使用哪個引擎
     const now = Date.now();
     const geminiAvailable = genAI && now > geminiCooldownUntil;
@@ -210,10 +251,20 @@ async function handleMessage(userId, userMessage) {
       return { text: "未設定任何 AI API Key。請在環境變數設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY。" };
     }
 
+    // 還原使用者訊息（移除搜尋結果，避免污染對話記錄）
+    if (searchHint) {
+      history[history.length - 1].content = userMessage;
+    }
+
     history.push({ role: "assistant", content: response.text });
     logger.info(`[AI] === 回覆完成 === flights=${response.flights?.length || 0} textLen=${response.text?.length || 0}`);
     return response;
   } catch (error) {
+    // 還原使用者訊息
+    if (searchHint) {
+      const lastUserIdx = history.findLastIndex((m) => m.role === "user");
+      if (lastUserIdx >= 0) history[lastUserIdx].content = userMessage;
+    }
     logger.error("[AI] handleMessage 失敗", { error: error.message, stack: error.stack });
     return { text: `抱歉，系統發生錯誤：${error.message}\n請稍後再試！` };
   }
