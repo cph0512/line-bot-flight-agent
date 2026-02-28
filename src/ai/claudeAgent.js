@@ -38,11 +38,18 @@ if (useGemini) {
 // ========== 工具定義轉換（Anthropic → Gemini）==========
 function convertToolsToGemini(tools) {
   return [{
-    functionDeclarations: tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: convertSchema(t.input_schema),
-    })),
+    functionDeclarations: tools.map((t) => {
+      const decl = {
+        name: t.name,
+        description: t.description,
+      };
+      // 只在有實際 properties 時才加 parameters（空的會讓 Gemini 出錯）
+      const schema = t.input_schema;
+      if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
+        decl.parameters = convertSchema(schema);
+      }
+      return decl;
+    }),
   }];
 }
 
@@ -57,7 +64,7 @@ function convertSchema(schema) {
   if (schema.required) result.required = schema.required;
 
   // 遞迴轉換 properties
-  if (schema.properties) {
+  if (schema.properties && Object.keys(schema.properties).length > 0) {
     result.properties = {};
     for (const [key, val] of Object.entries(schema.properties)) {
       const prop = { ...val };
@@ -207,7 +214,7 @@ CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 
 ---
 ## ☀️ 每日晨報
-- 使用者說「早報」「今日摘要」「每日簡報」→ 呼叫 trigger_briefing
+- 使用者說「早報」「晨報」「今日摘要」「每日簡報」「晨報 測試」→ 呼叫 trigger_briefing
 - 整合多城市天氣 + 今日行程 + 多區域新聞一次推送
 - 系統已設定每日自動定時推送（透過 MORNING_BRIEFING_TIME 排程）
 - 支援多城市天氣（透過 BRIEFING_CITIES 設定）
@@ -245,7 +252,7 @@ async function handleMessage(userId, userMessage) {
 }
 
 // ================================================================
-// Gemini Agent Loop
+// Gemini Agent Loop（使用 generateContent API）
 // ================================================================
 async function runGeminiLoop(history) {
   let iterations = 5;
@@ -257,28 +264,32 @@ async function runGeminiLoop(history) {
   );
 
   const agentWork = async () => {
-    // 轉換歷史紀錄為 Gemini 格式
-    const geminiHistory = history.slice(0, -1).map((msg) => ({
+    // 轉換歷史紀錄為 Gemini contents 格式
+    const contents = history.map((msg) => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }],
     }));
 
-    const lastMessage = history[history.length - 1].content;
+    const geminiConfig = {
+      systemInstruction: getSystemPrompt(),
+      tools: geminiTools,
+    };
 
-    logger.info(`[AI] 呼叫 Gemini API (${config.gemini.model})... history=${geminiHistory.length}`);
-
-    const chat = genAI.chats.create({
-      model: config.gemini.model,
-      history: geminiHistory,
-      config: {
-        systemInstruction: getSystemPrompt(),
-        tools: geminiTools,
-      },
-    });
-
-    let response = await chat.sendMessage({ message: lastMessage });
+    logger.info(`[AI] 呼叫 Gemini API (${config.gemini.model})... contents=${contents.length}`);
 
     while (iterations-- > 0) {
+      let response;
+      try {
+        response = await genAI.models.generateContent({
+          model: config.gemini.model,
+          contents,
+          config: geminiConfig,
+        });
+      } catch (e) {
+        logger.error(`[AI] Gemini API 錯誤: ${e.message}`);
+        return { text: `AI 呼叫失敗：${e.message}` };
+      }
+
       // 檢查是否有 function call
       const functionCalls = response.functionCalls || [];
 
@@ -289,14 +300,19 @@ async function runGeminiLoop(history) {
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
+      // 把 model 的回覆（含 functionCall）加入 contents
+      if (response.candidates && response.candidates[0] && response.candidates[0].content) {
+        contents.push(response.candidates[0].content);
+      }
+
       // 執行所有 function calls
-      const functionResponses = [];
+      const functionResponseParts = [];
 
       for (const fc of functionCalls) {
         logger.info(`[AI] >>> 呼叫工具: ${fc.name}`, { input: JSON.stringify(fc.args) });
 
         const startTime = Date.now();
-        const result = await executeTool(fc.name, fc.args);
+        const result = await executeTool(fc.name, fc.args || {});
         const elapsed = Date.now() - startTime;
 
         logger.info(`[AI] <<< 工具完成: ${fc.name} (${elapsed}ms) flightsFound=${result.flights?.length || 0}`);
@@ -308,14 +324,16 @@ async function runGeminiLoop(history) {
           lastInboundFlights = result.inboundFlights;
         }
 
-        functionResponses.push({
-          name: fc.name,
-          response: { result: typeof result.text === "string" ? result.text : JSON.stringify(result.text) },
+        functionResponseParts.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: typeof result.text === "string" ? result.text : JSON.stringify(result.text) },
+          },
         });
       }
 
-      // 把工具結果送回 Gemini
-      response = await chat.sendMessage({ message: functionResponses.map((fr) => ({ functionResponse: fr })) });
+      // 把工具結果加入 contents
+      contents.push({ role: "user", parts: functionResponseParts });
     }
 
     return { text: "查詢太複雜了，試試：「台北飛東京 3/15-3/20」" };
