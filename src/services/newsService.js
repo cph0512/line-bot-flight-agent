@@ -1,8 +1,8 @@
 // =============================================
 // 新聞服務 — Google News RSS（免費、無限制）
 //
-// 主要來源：Google News RSS（不需 API key）
-// 備援來源：NewsAPI（如有設定 KEY，本地開發可用）
+// 台灣新聞：Google News TW RSS
+// 國際新聞：Google News US RSS（英文）
 // 內建 10 分鐘快取
 // =============================================
 
@@ -16,15 +16,26 @@ const CATEGORY_NAMES = {
   sports: "體育", entertainment: "娛樂", health: "健康", science: "科學",
 };
 
-// Google News RSS topic IDs（台灣版）
-const GOOGLE_NEWS_TOPICS = {
-  general: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FucG9HZ0pVVnlnQVAB",       // 焦點新聞
-  business: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FucG9HZ0pVVnlnQVAB",      // 商業
-  technology: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FucG9HZ0pVVnlnQVAB",    // 科技
-  sports: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FucG9HZ0pVVnlnQVAB",        // 體育
-  entertainment: "CAAqJggKIiBDQkFTRWdvSUwyMHZNREpxYW5RU0FucG9HZ0pVVnlnQVAB",  // 娛樂
-  health: "CAAqIQgKIhtDQkFTRGdvSUwyMHZNR3QwTlRFU0FucG9LQUFQAQ",              // 健康
-  science: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp0Y1RjU0FucG9HZ0pVVnlnQVAB",       // 科學
+// Google News RSS topic IDs（台灣版 TW:zh-Hant）
+const GOOGLE_NEWS_TOPICS_TW = {
+  general: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FucG9HZ0pVVnlnQVAB",
+  business: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FucG9HZ0pVVnlnQVAB",
+  technology: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FucG9HZ0pVVnlnQVAB",
+  sports: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FucG9HZ0pVVnlnQVAB",
+  entertainment: "CAAqJggKIiBDQkFTRWdvSUwyMHZNREpxYW5RU0FucG9HZ0pVVnlnQVAB",
+  health: "CAAqIQgKIhtDQkFTRGdvSUwyMHZNR3QwTlRFU0FucG9LQUFQAQ",
+  science: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp0Y1RjU0FucG9HZ0pVVnlnQVAB",
+};
+
+// Google News RSS topic IDs（國際版 US:en）
+const GOOGLE_NEWS_TOPICS_WORLD = {
+  general: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB",
+  business: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB",
+  technology: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB",
+  sports: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FtVnVHZ0pWVXlnQVAB",
+  entertainment: "CAAqJggKIiBDQkFTRWdvSUwyMHZNREpxYW5RU0FtVnVHZ0pWVXlnQVAB",
+  health: "CAAqIQgKIhtDQkFTRGdvSUwyMHZNR3QwTlRFU0FtVnVLQUFQAQ",
+  science: "CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp0Y1RjU0FtVnVHZ0pWVXlnQVAB",
 };
 
 // 簡易記憶體快取（10 分鐘 TTL）
@@ -98,25 +109,28 @@ function formatDate(dateStr) {
  * 查詢新聞（Google News RSS）
  * @param {string} category - 分類
  * @param {number} count - 筆數（1-10）
+ * @param {string} region - 地區："tw"=台灣, "world"=國際
  */
-async function getNews(category, count = 5) {
+async function getNews(category, count = 5, region = "tw") {
   const cat = VALID_CATEGORIES.includes(category) ? category : "general";
   const num = Math.min(Math.max(count, 1), 10);
   const catName = CATEGORY_NAMES[cat];
+  const isWorld = region === "world";
+  const regionLabel = isWorld ? "國際" : "台灣";
 
-  logger.info(`[News] 查詢 ${catName} 新聞 ${num} 筆`);
+  logger.info(`[News] 查詢 ${regionLabel}${catName} 新聞 ${num} 筆`);
 
   // 檢查快取
-  const cacheKey = `${cat}:${num}`;
+  const cacheKey = `${region}:${cat}:${num}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.time < CACHE_TTL) {
     logger.info(`[News] 使用快取（${Math.round((Date.now() - cached.time) / 1000)}秒前）`);
     return cached.result;
   }
 
-  // 優先 Google News RSS
+  // Google News RSS
   try {
-    const result = await fetchGoogleNews(cat, num, catName);
+    const result = await fetchGoogleNews(cat, num, catName, isWorld);
     if (result) {
       cache.set(cacheKey, { time: Date.now(), result });
       return result;
@@ -125,8 +139,8 @@ async function getNews(category, count = 5) {
     logger.error(`[News] Google News RSS 失敗: ${error.message}`);
   }
 
-  // 備援：NewsAPI（如有設定）
-  if (config.news?.apiKey) {
+  // 備援：NewsAPI（僅台灣，且僅本地可用）
+  if (!isWorld && config.news?.apiKey) {
     try {
       const result = await fetchNewsAPI(cat, num, catName);
       if (result) {
@@ -138,20 +152,31 @@ async function getNews(category, count = 5) {
     }
   }
 
-  return { text: `新聞查詢失敗，請稍後再試。` };
+  return { text: `${regionLabel}新聞查詢失敗，請稍後再試。` };
 }
 
 /**
  * Google News RSS 來源
  */
-async function fetchGoogleNews(cat, num, catName) {
-  const topicId = GOOGLE_NEWS_TOPICS[cat];
-  // Google News Taiwan RSS
-  const url = topicId
-    ? `https://news.google.com/rss/topics/${topicId}?hl=zh-TW&gl=TW&ceid=TW:zh-Hant`
-    : `https://news.google.com/rss?hl=zh-TW&gl=TW&ceid=TW:zh-Hant`;
+async function fetchGoogleNews(cat, num, catName, isWorld = false) {
+  let url;
 
-  logger.info(`[News] 呼叫 Google News RSS: ${cat}`);
+  if (isWorld) {
+    // 國際新聞（英文 US 版）
+    const topicId = GOOGLE_NEWS_TOPICS_WORLD[cat];
+    url = topicId
+      ? `https://news.google.com/rss/topics/${topicId}?hl=en&gl=US&ceid=US:en`
+      : `https://news.google.com/rss?hl=en&gl=US&ceid=US:en`;
+  } else {
+    // 台灣新聞
+    const topicId = GOOGLE_NEWS_TOPICS_TW[cat];
+    url = topicId
+      ? `https://news.google.com/rss/topics/${topicId}?hl=zh-TW&gl=TW&ceid=TW:zh-Hant`
+      : `https://news.google.com/rss?hl=zh-TW&gl=TW&ceid=TW:zh-Hant`;
+  }
+
+  const regionLabel = isWorld ? "國際" : "台灣";
+  logger.info(`[News] 呼叫 Google News RSS (${regionLabel}): ${cat}`);
 
   const res = await fetch(url, {
     headers: {
@@ -169,10 +194,10 @@ async function fetchGoogleNews(cat, num, catName) {
   const articles = parseRssXml(xml, num);
 
   if (articles.length === 0) {
-    return null; // fallback to NewsAPI
+    return null;
   }
 
-  let text = `=== 台灣${catName}新聞 (前${articles.length}則) ===\n`;
+  let text = `=== ${regionLabel}${catName}新聞 (前${articles.length}則) ===\n`;
 
   articles.forEach((article, i) => {
     text += `\n${i + 1}. ${article.title}\n`;

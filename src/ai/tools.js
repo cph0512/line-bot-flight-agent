@@ -121,8 +121,10 @@ const tools = [
   // =============================================
   {
     name: "get_news",
-    description: `查詢台灣即時新聞。支援分類：general(綜合)、business(財經)、technology(科技)、sports(體育)、entertainment(娛樂)、health(健康)、science(科學)。
-使用者問最新新聞、今天新聞時使用。`,
+    description: `查詢台灣或國際即時新聞。支援分類：general(綜合)、business(財經)、technology(科技)、sports(體育)、entertainment(娛樂)、health(健康)、science(科學)。
+使用者問最新新聞、今天新聞時使用。
+使用者說「國際新聞」「世界新聞」「world news」→ region="world"。
+使用者說「台灣新聞」或沒指定 → region="tw"（預設）。`,
     input_schema: {
       type: "object",
       properties: {
@@ -132,6 +134,11 @@ const tools = [
           description: "新聞分類，預設 general",
         },
         count: { type: "number", description: "新聞筆數（1-10），預設 5", default: 5 },
+        region: {
+          type: "string",
+          enum: ["tw", "world"],
+          description: "地區：tw=台灣（預設），world=國際",
+        },
       },
     },
   },

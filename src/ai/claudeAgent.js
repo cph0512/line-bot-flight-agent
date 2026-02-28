@@ -110,8 +110,10 @@ CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 - 支援中英文城市名
 
 ---
-## 📰 新聞查詢
-- 使用 get_news 工具取得台灣即時新聞
+## 📰 新聞查詢（台灣+國際）
+- 使用 get_news 工具取得即時新聞
+- region="tw"（預設）台灣新聞，region="world" 國際新聞
+- 使用者說「國際新聞」「世界新聞」→ region="world"
 - 分類：general(綜合), business(財經), technology(科技), sports(體育), entertainment(娛樂), health(健康), science(科學)
 - 預設 5 筆，最多 10 筆
 
@@ -308,7 +310,7 @@ async function executeTool(name, input) {
 
   // === 新聞（永遠可用：Google News RSS）===
   if (name === "get_news") {
-    return await newsService.getNews(input.category || "general", input.count || 5);
+    return await newsService.getNews(input.category || "general", input.count || 5, input.region || "tw");
   }
 
   // === 行事曆：查詢 ===
