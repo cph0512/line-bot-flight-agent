@@ -67,8 +67,16 @@ function parseRssXml(xml, count) {
     const sourceMatch = item.match(/<source[^>]*>(.*?)<\/source>/) || item.match(/<source[^>]*><!\[CDATA\[(.*?)\]\]><\/source>/);
     const source = sourceMatch ? (sourceMatch[1] || "").trim() : "";
 
+    // 優先從 <source url="..."> 取得真正的文章連結
+    const sourceUrlMatch = item.match(/<source[^>]+url=["']([^"']+)["']/);
+    const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1].trim() : "";
+
+    // 退而求其次用 <link>（Google News redirect URL）
     const linkMatch = item.match(/<link>(.*?)<\/link>/) || item.match(/<link><!\[CDATA\[(.*?)\]\]><\/link>/);
-    const link = linkMatch ? (linkMatch[1] || "").trim() : "";
+    const rawLink = linkMatch ? (linkMatch[1] || "").trim() : "";
+
+    // 使用真正的文章連結，避免 Google News redirect URL
+    const link = sourceUrl || rawLink;
 
     const pubDateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/);
     const pubDate = pubDateMatch ? pubDateMatch[1].trim() : "";

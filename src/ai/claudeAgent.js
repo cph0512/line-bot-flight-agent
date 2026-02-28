@@ -150,7 +150,11 @@ CI=華航, BR=長榮, JX=星宇, EK=阿聯酋, TK=土航, CX=國泰, SQ=新航
 ---
 ## ☀️ 每日晨報
 - 使用者說「早報」「今日摘要」「每日簡報」→ 呼叫 trigger_briefing
-- 整合天氣 + 今日行程 + 新聞一次推送`;
+- 整合多城市天氣 + 今日行程 + 多區域新聞一次推送
+- 系統已設定每日自動定時推送（透過 MORNING_BRIEFING_TIME 排程）
+- 支援多城市天氣（透過 BRIEFING_CITIES 設定）
+- 支援多區域/分類新聞（透過 BRIEFING_NEWS 設定）
+- 使用者問「可以自動早報嗎？」→ 回答：已有自動排程功能，需在 Railway 環境變數設定 BRIEFING_RECIPIENTS（LINE userId）和 MORNING_BRIEFING_TIME`;
 }
 
 // 對話記錄

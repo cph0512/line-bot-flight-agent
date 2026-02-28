@@ -53,8 +53,29 @@ const config = {
     timezone: process.env.TZ || "Asia/Taipei",
     recipients: (process.env.BRIEFING_RECIPIENTS || "").split(",").filter(Boolean),
     defaultCity: process.env.DEFAULT_CITY || "臺北市",
+    // 多城市天氣，逗號分隔（例如 "桃園,龍潭,台北"）
+    cities: (process.env.BRIEFING_CITIES || process.env.DEFAULT_CITY || "臺北市").split(",").map(s => s.trim()).filter(Boolean),
+    // 新聞區塊，格式 "region:category:count,..." （例如 "tw:business:3,tw:general:3,world:business:3,world:general:3"）
+    newsSections: parseBriefingNews(process.env.BRIEFING_NEWS),
   },
 };
+
+/**
+ * 解析晨報新聞設定
+ * 格式: "region:category:count,..." e.g. "tw:business:3,tw:general:3,world:business:3,world:general:3"
+ * 預設: 台灣綜合 5 筆
+ */
+function parseBriefingNews(str) {
+  if (!str) return [{ region: "tw", category: "general", count: 5 }];
+  return str.split(",").map((s) => {
+    const [region, category, count] = s.trim().split(":");
+    return {
+      region: region || "tw",
+      category: category || "general",
+      count: parseInt(count) || 3,
+    };
+  }).filter((s) => s.region && s.category);
+}
 
 /**
  * 解析家庭行事曆設定
