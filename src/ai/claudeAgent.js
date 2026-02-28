@@ -260,10 +260,30 @@ async function runGeminiLoop(history) {
       }
 
       const functionCalls = response.functionCalls || [];
-      logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text}`);
+
+      // 檢查 Google Search grounding
+      const candidate = response.candidates?.[0];
+      const grounding = candidate?.groundingMetadata;
+      const searchQueries = grounding?.webSearchQueries || [];
+      const groundingChunks = grounding?.groundingChunks || [];
+      const wasGrounded = groundingChunks.length > 0;
+
+      logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text} grounded=${wasGrounded} searchQueries=${JSON.stringify(searchQueries)}`);
 
       if (functionCalls.length === 0) {
-        const text = response.text || "抱歉，我不太理解。試試：「台灣新聞」「台北天氣」「晨報」";
+        let text = response.text || "抱歉，我不太理解。試試：「台灣新聞」「台北天氣」「晨報」";
+
+        // 如果有 Google Search grounding，附上來源
+        if (wasGrounded && groundingChunks.length > 0) {
+          const sources = groundingChunks
+            .filter(c => c.web?.title)
+            .map(c => c.web.title)
+            .slice(0, 3);
+          if (sources.length > 0) {
+            text += `\n\n📎 資料來源：${sources.join("、")}`;
+          }
+        }
+
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
       }
 
