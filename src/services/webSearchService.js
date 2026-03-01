@@ -312,6 +312,7 @@ function formatResults(query, results) {
   results.forEach((r, i) => {
     text += `\n${i + 1}. ${r.title}\n`;
     if (r.snippet) text += `   ${r.snippet}\n`;
+    if (r.url) text += `   🔗 ${r.url}\n`;
   });
   return text;
 }
