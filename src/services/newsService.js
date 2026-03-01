@@ -217,10 +217,10 @@ async function fetchGoogleNews(cat, num, catName, isWorld = false) {
     text += `   來源: ${article.source}`;
     if (article.date) text += ` | ${article.date}`;
     text += "\n";
-    // 不顯示連結（太長影響閱讀）
+    if (article.link) text += `   🔗 ${article.link}\n`;
   });
 
-  return { text };
+  return { text, articles };
 }
 
 /**
@@ -255,6 +255,7 @@ async function fetchNewsAPI(cat, num, catName) {
     if (date) text += ` | ${date}`;
     text += "\n";
     if (desc) text += `   ${desc}\n`;
+    if (article.url) text += `   🔗 ${article.url}\n`;
   });
 
   return { text };

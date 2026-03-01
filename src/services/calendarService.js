@@ -132,8 +132,14 @@ async function getEvents(calendarName, startDate, endDate) {
     let text = `=== 行程 (${start}${start !== end ? ` ~ ${end}` : ""}) ===\n`;
     text += `共 ${allEvents.length} 個事件\n`;
 
+    // 判斷是否跨多天（需要顯示日期）
+    const isMultiDay = start !== end;
+
     for (const evt of allEvents) {
-      const timeStr = evt.allDay ? "全天" : `${evt.startTime}-${evt.endTime}`;
+      // 取得事件日期（用於多天查詢時顯示）
+      const evtDate = evt.start ? evt.start.slice(0, 10) : "";
+      const datePrefix = isMultiDay && evtDate ? `${evtDate} ` : "";
+      const timeStr = evt.allDay ? `${datePrefix}全天` : `${datePrefix}${evt.startTime}-${evt.endTime}`;
       text += `\n${timeStr} | ${evt.summary}`;
       if (evt.location) text += ` (${evt.location})`;
       if (evt.calendarLabel) text += ` [${evt.calendarLabel}]`;

@@ -143,7 +143,14 @@ async function triggerBriefing() {
 
     b += `${regionLabel} ${catLabel}：\n`;
 
-    if (news && news.text) {
+    if (news && news.articles && news.articles.length > 0) {
+      // 晨報只顯示標題+來源（不含連結，保持簡潔）
+      news.articles.forEach((article, idx) => {
+        b += `${idx + 1}. ${article.title}\n`;
+        if (article.source) b += `   📍${article.source}\n`;
+      });
+    } else if (news && news.text) {
+      // fallback: 解析純文字
       const lines = news.text.split("\n").filter((l) => l.trim() && !l.startsWith("===") && !l.startsWith("共"));
       let count = 0;
       for (const line of lines) {

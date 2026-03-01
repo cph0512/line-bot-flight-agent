@@ -11,6 +11,39 @@ const logger = require("../utils/logger");
 const BASE_URL = "https://google-flights2.p.rapidapi.com/api/v1";
 const HOST = "google-flights2.p.rapidapi.com";
 
+// 知名航空公司（用於排序：優先顯示這些航空，冷門的排後面）
+const KNOWN_AIRLINES = new Set([
+  // 台灣
+  "長榮航空", "中華航空", "星宇航空", "台灣虎航",
+  "EVA Air", "China Airlines", "STARLUX", "Tigerair Taiwan",
+  // 東北亞
+  "日本航空", "全日空", "大韓航空", "韓亞航空", "樂桃航空", "捷星日本",
+  "Japan Airlines", "ANA", "Korean Air", "Asiana Airlines", "Peach", "Jetstar Japan",
+  // 東南亞
+  "新加坡航空", "國泰航空", "泰國航空", "越南航空", "菲律賓航空", "馬來西亞航空",
+  "Singapore Airlines", "Cathay Pacific", "Thai Airways", "Vietnam Airlines", "Philippine Airlines", "Malaysia Airlines",
+  // 中東
+  "阿聯酋航空", "土耳其航空", "卡達航空",
+  "Emirates", "Turkish Airlines", "Qatar Airways",
+  // 歐美
+  "聯合航空", "美國航空", "達美航空", "英國航空", "漢莎航空", "法國航空", "荷蘭航空",
+  "United Airlines", "American Airlines", "Delta Air Lines", "British Airways", "Lufthansa", "Air France", "KLM",
+  // 大洋洲
+  "澳洲航空", "紐西蘭航空",
+  "Qantas", "Air New Zealand",
+]);
+
+/**
+ * 檢查是否為知名航空公司
+ * 支援組合航空（如 "長榮航空 / 全日空"）只要有一個知名就算
+ */
+function isKnownAirline(airlineName) {
+  if (!airlineName) return false;
+  // 處理組合航空（用 / 分隔）
+  const parts = airlineName.split(/\s*\/\s*/);
+  return parts.some(name => KNOWN_AIRLINES.has(name.trim()));
+}
+
 /**
  * 檢查是否可用（有 RapidAPI Key）
  */
@@ -192,8 +225,13 @@ function parseFlightResults(data) {
     if (flight) flights.push(flight);
   }
 
-  // 按價格排序
-  flights.sort((a, b) => (a.price || 999999) - (b.price || 999999));
+  // 排序：知名航空優先，同組內按價格
+  flights.sort((a, b) => {
+    const aKnown = isKnownAirline(a.airline);
+    const bKnown = isKnownAirline(b.airline);
+    if (aKnown !== bKnown) return aKnown ? -1 : 1; // 知名航空排前面
+    return (a.price || 999999) - (b.price || 999999); // 同組按價格
+  });
 
   return flights;
 }
