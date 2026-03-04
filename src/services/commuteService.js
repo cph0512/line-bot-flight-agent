@@ -103,6 +103,19 @@ function parseRoutes(data) {
 }
 
 /**
+ * 產生 Google Maps 導航連結
+ */
+function buildMapsLink(origin, destination) {
+  const params = new URLSearchParams({
+    api: "1",
+    origin,
+    destination,
+    travelmode: "driving",
+  });
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+/**
  * 塞車程度 emoji + 文字
  */
 function trafficStatus(ratio) {
@@ -179,6 +192,7 @@ async function getCommuteInfo(routeName) {
       const data = await fetchDirections(route.origin, route.destination);
       const parsed = parseRoutes(data);
       text += `\n${formatCommuteMessage(route.name, parsed)}`;
+      text += `\n🗺️ 導航：${buildMapsLink(route.origin, route.destination)}\n`;
       logger.info(`[Commute] ${route.name}: ${parsed.length} 條路線，最快 ${parsed[0]?.durationInTrafficText}`);
     } catch (e) {
       logger.error(`[Commute] ${route.name} 查詢失敗: ${e.message}`);
@@ -216,4 +230,4 @@ async function triggerCommuteNotification() {
   return result;
 }
 
-module.exports = { isAvailable, initCron, triggerCommuteNotification, getCommuteInfo, fetchDirections, parseRoutes, trafficStatus };
+module.exports = { isAvailable, initCron, triggerCommuteNotification, getCommuteInfo, fetchDirections, parseRoutes, trafficStatus, buildMapsLink };

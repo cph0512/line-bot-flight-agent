@@ -10,7 +10,7 @@ const logger = require("../utils/logger");
 const { config } = require("../config");
 const { lineClient } = require("../line/lineClient");
 const calendarService = require("./calendarService");
-const { fetchDirections, parseRoutes, trafficStatus } = require("./commuteService");
+const { fetchDirections, parseRoutes, trafficStatus, buildMapsLink } = require("./commuteService");
 
 // 已提醒事件的集合（防重複）
 const remindedSet = new Set();
@@ -146,13 +146,20 @@ async function buildReminderMessage(event, now) {
           const suggestedDepart = new Date(suggestedDepartMs);
           const departStr = `${String(suggestedDepart.getHours()).padStart(2, "0")}:${String(suggestedDepart.getMinutes()).padStart(2, "0")}`;
           text += `\n⏰ 建議 ${departStr} 前出發`;
+          text += `\n\n🗺️ 導航：${buildMapsLink(origin, event.location)}`;
         }
       } catch (e) {
         logger.warn(`[EventReminder] 路況查詢失敗: ${e.message}`);
         text += `\n⏰ ${timeUntilText}後開始`;
+        text += `\n\n🗺️ 導航：${buildMapsLink(origin, event.location)}`;
       }
     } else {
+      // 沒有 Google Maps API key，但有地點 → 給導航連結（不含路況）
+      const origin2 = getDefaultOrigin();
       text += `\n⏰ ${timeUntilText}後開始`;
+      if (origin2) {
+        text += `\n\n🗺️ 導航：${buildMapsLink(origin2, event.location)}`;
+      }
     }
   } else {
     text += `⏰ ${timeUntilText}後開始`;
