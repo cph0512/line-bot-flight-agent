@@ -223,6 +223,19 @@ app.get("/debug/flights", async (req, res) => {
   }
 });
 
+// ========== 通勤路況測試端點 ==========
+app.get("/debug/commute", async (req, res) => {
+  if (!commuteService.isAvailable()) {
+    return res.json({ success: false, error: "未設定 GOOGLE_MAPS_API_KEY 或 COMMUTE_ROUTES", config: { hasApiKey: !!config.commute?.googleMapsApiKey, routes: config.commute?.routes?.length || 0 } });
+  }
+  try {
+    const result = await commuteService.getCommuteInfo(req.query.route);
+    res.json({ success: true, text: result.text });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 // ========== LINE Webhook（必須放在 express.json() 之前！）==========
 // LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
 // 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
