@@ -67,6 +67,14 @@ const config = {
     // 新聞區塊，格式 "region:category:count,..." （例如 "tw:business:3,tw:general:3,world:business:3,world:general:3"）
     newsSections: parseBriefingNews(process.env.BRIEFING_NEWS),
   },
+  // 通勤路況（選填）
+  commute: {
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+    time: process.env.COMMUTE_NOTIFICATION_TIME || "08:15",
+    timezone: process.env.TZ || "Asia/Taipei",
+    weekdayOnly: process.env.COMMUTE_WEEKDAY_ONLY !== "false", // 預設只有平日
+    routes: parseCommuteRoutes(process.env.COMMUTE_ROUTES),
+  },
 };
 
 /**
@@ -96,6 +104,18 @@ function parseFamilyCalendars(str) {
     const [name, id] = pair.split(":").map((s) => s.trim());
     return { name, id };
   }).filter((c) => c.name && c.id);
+}
+
+/**
+ * 解析通勤路線設定
+ * 格式: "名稱|起點地址|終點地址,名稱|起點地址|終點地址"
+ */
+function parseCommuteRoutes(str) {
+  if (!str) return [];
+  return str.split(",").map((route) => {
+    const [name, origin, destination] = route.split("|").map((s) => s.trim());
+    return { name, origin, destination };
+  }).filter((r) => r.name && r.origin && r.destination);
 }
 
 // 檢查是否為佔位符值
@@ -159,6 +179,11 @@ function validateConfig() {
     console.log(`[Config] 每日晨報: ${config.briefing.time} → ${config.briefing.recipients.length} 位接收者`);
   } else {
     console.log(`[Config] 每日晨報: 未設定接收者（晨報功能停用）`);
+  }
+  if (config.commute.googleMapsApiKey && config.commute.routes.length > 0) {
+    console.log(`[Config] 通勤路況: ${config.commute.time} (${config.commute.weekdayOnly ? "週一至五" : "每日"}) → ${config.commute.routes.length} 條路線`);
+  } else {
+    console.log(`[Config] 通勤路況: 未設定（需 GOOGLE_MAPS_API_KEY + COMMUTE_ROUTES）`);
   }
 }
 

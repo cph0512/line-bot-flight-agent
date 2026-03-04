@@ -15,7 +15,7 @@ const {
   formatResultsForAI,
   getBookingLinks,
 } = require("../scraper/scraperEngine");
-const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService } = require("../services");
+const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService, commuteService } = require("../services");
 const logger = require("../utils/logger");
 
 // ========== AI Client 初始化（兩個都初始化）==========
@@ -123,6 +123,7 @@ function getSystemPrompt() {
 - 加行程/新增會議 → add_event
 - 改行程 → 先 get_events 再 update_event
 - 刪行程/取消 → 先 get_events 再 delete_event
+- 路況/通勤/塞車/開車要多久 → get_commute
 - 股價/匯率/賽程/活動/推薦/任何需要查證的問題 → search_web
 
 ## 搜尋技巧（search_web）
@@ -195,9 +196,12 @@ const SEARCH_PATTERNS = [
 
 // 航班相關查詢不走自動搜尋（交給 Gemini 用 search_google_flights）
 const FLIGHT_KEYWORDS = /機票|航班|飛|航空|直飛|轉機|商務艙|經濟艙|頭等艙|來回|單程|訂票/;
+// 通勤相關查詢不走自動搜尋（交給 Gemini 用 get_commute）
+const COMMUTE_KEYWORDS = /路況|通勤|塞車|開車.*多久|上班路|上學路/;
 
 function needsWebSearch(message) {
   if (FLIGHT_KEYWORDS.test(message)) return false;
+  if (COMMUTE_KEYWORDS.test(message)) return false;
   return SEARCH_PATTERNS.some((pattern) => pattern.test(message));
 }
 
@@ -324,6 +328,7 @@ async function runGeminiLoop(history) {
     // 偵測是否為工具型查詢（航班/天氣/新聞/晨報/行程）
     const lastUserMsg = history[history.length - 1]?.content || "";
     const isToolQuery = FLIGHT_KEYWORDS.test(lastUserMsg) ||
+      COMMUTE_KEYWORDS.test(lastUserMsg) ||
       /天氣|氣溫|下雨|溫度/.test(lastUserMsg) ||
       /新聞|頭條|時事/.test(lastUserMsg) ||
       /晨報|早報|簡報/.test(lastUserMsg) ||
@@ -584,6 +589,17 @@ async function executeTool(name, input) {
       return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };
     } catch (e) {
       return { text: `晨報推送失敗：${e.message}` };
+    }
+  }
+
+  // ====== 通勤路況工具 ======
+  if (name === "get_commute") {
+    if (!commuteService.isAvailable()) return { text: "通勤路況功能未啟用（未設定 GOOGLE_MAPS_API_KEY 或 COMMUTE_ROUTES）。" };
+    try {
+      return await commuteService.getCommuteInfo(input.routeName);
+    } catch (e) {
+      logger.error(`[Tool] get_commute 失敗: ${e.message}`);
+      return { text: `通勤路況查詢失敗：${e.message}` };
     }
   }
 

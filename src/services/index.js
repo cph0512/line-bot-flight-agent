@@ -4,6 +4,7 @@ const calendarService = require("./calendarService");
 const briefingService = require("./briefingService");
 const webSearchService = require("./webSearchService");
 const googleFlightsService = require("./googleFlightsService");
+const commuteService = require("./commuteService");
 
 module.exports = {
   weatherService,
@@ -12,4 +13,5 @@ module.exports = {
   briefingService,
   webSearchService,
   googleFlightsService,
+  commuteService,
 };

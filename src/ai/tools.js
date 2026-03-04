@@ -190,6 +190,17 @@ const tools = [
     },
   },
   {
+    name: "get_commute",
+    description: "查通勤路況與預估抵達時間。使用者問路況、通勤時間、塞車、開車要多久、上班路況、上學路況時使用。",
+    input_schema: {
+      type: "object",
+      properties: {
+        routeName: { type: "string", description: "路線名稱（可選），不指定則查全部路線" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "search_google_flights",
     description: "【主要工具】搜尋機票比價。查航班、查機票、找便宜機票、比價時一律使用此工具。資料來自 Google Flights，票價最即時準確。",
     input_schema: {

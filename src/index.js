@@ -6,7 +6,7 @@ const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
 const flightApi = require("./api/flightApi");
-const { weatherService, newsService, calendarService, briefingService, googleFlightsService } = require("./services");
+const { weatherService, newsService, calendarService, briefingService, googleFlightsService, commuteService } = require("./services");
 const logger = require("./utils/logger");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
@@ -41,6 +41,7 @@ app.get("/", (req, res) => {
     news: newsService.isAvailable() ? "enabled" : "disabled",
     calendar: calendarService.isAvailable() ? "enabled" : "disabled",
     briefing: briefingService.isAvailable() ? "enabled" : "disabled",
+    commute: commuteService.isAvailable() ? "enabled" : "disabled",
   });
 });
 
@@ -133,6 +134,7 @@ app.get("/health", async (req, res) => {
     news: newsService.isAvailable() ? "enabled" : "disabled (no NEWS_API_KEY)",
     calendar: calendarService.isAvailable() ? "enabled" : "disabled (no Google Calendar config)",
     briefing: briefingService.isAvailable() ? "enabled" : "disabled (no BRIEFING_RECIPIENTS)",
+    commute: commuteService.isAvailable() ? "enabled" : "disabled (no GOOGLE_MAPS_API_KEY or COMMUTE_ROUTES)",
   };
 
   const allOk = !JSON.stringify(report).includes("FAIL") && !JSON.stringify(report).includes("MISSING");
@@ -276,12 +278,17 @@ app.listen(config.server.port, () => {
   console.log(`  新聞:     ${newsService.isAvailable() ? "✅ NewsAPI 已設定" : "⬜ 未設定"}`);
   console.log(`  行事曆:   ${calendarService.isAvailable() ? "✅ Google Calendar 已設定" : "⬜ 未設定"}`);
   console.log(`  晨報:     ${briefingService.isAvailable() ? "✅ " + config.briefing.time + " → " + config.briefing.recipients.length + " 位" : "⬜ 未設定"}`);
+  console.log(`  通勤路況: ${commuteService.isAvailable() ? "✅ " + config.commute.time + " (" + (config.commute.weekdayOnly ? "平日" : "每日") + ") " + config.commute.routes.length + " 路線" : "⬜ 未設定"}`);
   console.log("=".repeat(55));
   console.log("  支援航空: CI / BR / JX / EK / TK / CX / SQ\n");
 
   // 啟動晨報排程
   if (briefingService.isAvailable()) {
     briefingService.initCron();
+  }
+  // 啟動通勤路況排程
+  if (commuteService.isAvailable()) {
+    commuteService.initCron();
   }
 });
 
