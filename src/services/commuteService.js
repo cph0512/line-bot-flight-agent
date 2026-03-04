@@ -216,4 +216,4 @@ async function triggerCommuteNotification() {
   return result;
 }
 
-module.exports = { isAvailable, initCron, triggerCommuteNotification, getCommuteInfo };
+module.exports = { isAvailable, initCron, triggerCommuteNotification, getCommuteInfo, fetchDirections, parseRoutes, trafficStatus };

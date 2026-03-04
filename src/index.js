@@ -6,7 +6,7 @@ const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
 const flightApi = require("./api/flightApi");
-const { weatherService, newsService, calendarService, briefingService, googleFlightsService, commuteService } = require("./services");
+const { weatherService, newsService, calendarService, briefingService, googleFlightsService, commuteService, eventReminderService } = require("./services");
 const logger = require("./utils/logger");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
@@ -42,6 +42,7 @@ app.get("/", (req, res) => {
     calendar: calendarService.isAvailable() ? "enabled" : "disabled",
     briefing: briefingService.isAvailable() ? "enabled" : "disabled",
     commute: commuteService.isAvailable() ? "enabled" : "disabled",
+    eventReminder: eventReminderService.isAvailable() ? `enabled (${config.eventReminder?.minutes || 120}min)` : "disabled",
   });
 });
 
@@ -135,6 +136,7 @@ app.get("/health", async (req, res) => {
     calendar: calendarService.isAvailable() ? "enabled" : "disabled (no Google Calendar config)",
     briefing: briefingService.isAvailable() ? "enabled" : "disabled (no BRIEFING_RECIPIENTS)",
     commute: commuteService.isAvailable() ? "enabled" : "disabled (no GOOGLE_MAPS_API_KEY or COMMUTE_ROUTES)",
+    eventReminder: eventReminderService.isAvailable() ? `enabled (${config.eventReminder?.minutes || 120}min before)` : "disabled (no calendar)",
   };
 
   const allOk = !JSON.stringify(report).includes("FAIL") && !JSON.stringify(report).includes("MISSING");
@@ -236,6 +238,19 @@ app.get("/debug/commute", async (req, res) => {
   }
 });
 
+// ========== 行事曆提醒測試端點 ==========
+app.get("/debug/reminder", async (req, res) => {
+  if (!eventReminderService.isAvailable()) {
+    return res.json({ success: false, error: "行事曆未設定" });
+  }
+  try {
+    await eventReminderService.checkUpcomingEvents();
+    res.json({ success: true, message: "已執行事件掃描，若有即將開始的事件會推播提醒" });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 // ========== LINE Webhook（必須放在 express.json() 之前！）==========
 // LINE SDK 的 lineMiddleware 需要讀取 raw body 做簽名驗證
 // 如果 express.json() 先跑，會把 raw body 消費掉 → 簽名驗證失敗 → 401
@@ -292,6 +307,7 @@ app.listen(config.server.port, () => {
   console.log(`  行事曆:   ${calendarService.isAvailable() ? "✅ Google Calendar 已設定" : "⬜ 未設定"}`);
   console.log(`  晨報:     ${briefingService.isAvailable() ? "✅ " + config.briefing.time + " → " + config.briefing.recipients.length + " 位" : "⬜ 未設定"}`);
   console.log(`  通勤路況: ${commuteService.isAvailable() ? "✅ " + config.commute.time + " (" + (config.commute.weekdayOnly ? "平日" : "每日") + ") " + config.commute.routes.length + " 路線" : "⬜ 未設定"}`);
+  console.log(`  行程提醒: ${eventReminderService.isAvailable() ? "✅ 每 5 分鐘掃描，提前 " + (config.eventReminder?.minutes || 120) + " 分鐘提醒" : "⬜ 未設定"}`);
   console.log("=".repeat(55));
   console.log("  支援航空: CI / BR / JX / EK / TK / CX / SQ\n");
 
@@ -302,6 +318,10 @@ app.listen(config.server.port, () => {
   // 啟動通勤路況排程
   if (commuteService.isAvailable()) {
     commuteService.initCron();
+  }
+  // 啟動行事曆提醒排程
+  if (eventReminderService.isAvailable()) {
+    eventReminderService.initCron();
   }
 });
 

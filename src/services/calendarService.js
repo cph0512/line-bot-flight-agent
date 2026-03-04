@@ -321,4 +321,41 @@ function ensureTimezone(timeStr) {
   return timeStr + "+08:00";
 }
 
-module.exports = { isAvailable, getEvents, addEvent, updateEvent, deleteEvent };
+/**
+ * 取得原始事件陣列（供 eventReminderService 等內部服務使用）
+ * 查詢主行事曆 + 所有 family calendars
+ */
+async function getRawEvents(startDate, endDate) {
+  if (!isAvailable()) return [];
+
+  const calendar = getCalendarClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const start = startDate || today;
+  const end = endDate || start;
+
+  const timeMin = new Date(`${start}T00:00:00+08:00`).toISOString();
+  const timeMax = new Date(`${end}T23:59:59+08:00`).toISOString();
+
+  try {
+    // 主行事曆
+    const events = await fetchEvents(calendar, config.calendar.calendarId, timeMin, timeMax);
+
+    // 家庭行事曆
+    for (const fc of config.calendar.familyCalendars || []) {
+      try {
+        const fEvents = await fetchEvents(calendar, fc.id, timeMin, timeMax);
+        events.push(...fEvents.map((e) => ({ ...e, calendarLabel: fc.name })));
+      } catch (e) {
+        logger.warn(`[Calendar] getRawEvents: ${fc.name} 查詢失敗: ${e.message}`);
+      }
+    }
+
+    events.sort((a, b) => new Date(a.start) - new Date(b.start));
+    return events;
+  } catch (error) {
+    logger.error(`[Calendar] getRawEvents 失敗: ${error.message}`);
+    return [];
+  }
+}
+
+module.exports = { isAvailable, getEvents, addEvent, updateEvent, deleteEvent, getRawEvents };

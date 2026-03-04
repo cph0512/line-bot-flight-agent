@@ -67,6 +67,11 @@ const config = {
     // 新聞區塊，格式 "region:category:count,..." （例如 "tw:business:3,tw:general:3,world:business:3,world:general:3"）
     newsSections: parseBriefingNews(process.env.BRIEFING_NEWS),
   },
+  // 行事曆提醒（選填 — 需行事曆可用）
+  eventReminder: {
+    minutes: parseInt(process.env.EVENT_REMINDER_MINUTES) || 120, // 預設提前 2 小時
+    origin: process.env.EVENT_REMINDER_ORIGIN || null, // null = 用 COMMUTE_ROUTES 第一條起點
+  },
   // 通勤路況（選填）
   commute: {
     googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
@@ -180,6 +185,13 @@ function validateConfig() {
   } else {
     console.log(`[Config] 每日晨報: 未設定接收者（晨報功能停用）`);
   }
+  // 行事曆提醒
+  if (config.calendar.keyFile || process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    console.log(`[Config] 行事曆提醒: 事件前 ${config.eventReminder.minutes} 分鐘提醒`);
+  } else {
+    console.log(`[Config] 行事曆提醒: 未設定（需行事曆功能啟用）`);
+  }
+
   if (config.commute.googleMapsApiKey && config.commute.routes.length > 0) {
     console.log(`[Config] 通勤路況: ${config.commute.time} (${config.commute.weekdayOnly ? "週一至五" : "每日"}) → ${config.commute.routes.length} 條路線`);
   } else {
