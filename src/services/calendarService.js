@@ -143,7 +143,7 @@ async function getEvents(calendarName, startDate, endDate) {
       text += `\n${timeStr} | ${evt.summary}`;
       if (evt.location) text += ` (${evt.location})`;
       if (evt.calendarLabel) text += ` [${evt.calendarLabel}]`;
-      text += `\n  eventId: ${evt.id}`;
+      text += `\n  [id:${evt.id}]`;
     }
 
     return { text };
@@ -192,14 +192,14 @@ async function addEvent(calendarName, summary, startTime, endTime, description) 
 
         const res = await calendar.events.insert({ calendarId: calId, resource: event });
         return {
-          text: `⚠️ 注意：有 ${conflicts.length} 個時間衝突的事件：\n${conflictList}\n\n已新增事件「${summary}」（eventId: ${res.data.id}）`,
+          text: `⚠️ 注意：有 ${conflicts.length} 個時間衝突的事件：\n${conflictList}\n\n已新增事件「${summary}」[id:${res.data.id}]`,
         };
       }
     }
 
     const res = await calendar.events.insert({ calendarId: calId, resource: event });
     const dateLabel = isAllDay ? startTime : startTime.slice(0, 16).replace("T", " ");
-    return { text: `已新增事件「${summary}」在 ${dateLabel}\neventId: ${res.data.id}` };
+    return { text: `已新增事件「${summary}」在 ${dateLabel} [id:${res.data.id}]` };
   } catch (error) {
     logger.error(`[Calendar] 新增事件失敗: ${error.message}`);
     return { text: `新增事件失敗：${error.message}` };
@@ -243,7 +243,7 @@ async function updateEvent(eventId, calendarName, updates) {
     });
 
     const changedFields = Object.keys(patch).join(", ");
-    return { text: `已更新事件（${changedFields}）\neventId: ${eventId}` };
+    return { text: `已更新事件（${changedFields}）` };
   } catch (error) {
     logger.error(`[Calendar] 更新事件失敗: ${error.message}`);
     return { text: `更新事件失敗：${error.message}` };

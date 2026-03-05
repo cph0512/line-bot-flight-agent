@@ -124,6 +124,7 @@ function getSystemPrompt() {
 - 加行程/新增會議 → add_event
 - 改行程 → 先 get_events 再 update_event
 - 刪行程/取消 → 先 get_events 再 delete_event
+- ⚠️ eventId 是內部代碼，絕對不要顯示給使用者看。回覆時只說事件名稱和時間，不要附 eventId。
 - 路況/通勤/塞車/開車要多久 → get_commute（回覆會附 Google Maps 導航連結）
 - 路線規劃/導航/Google Maps 連結 → 用此格式產生連結：https://www.google.com/maps/dir/?api=1&origin=起點地址&destination=終點地址&travelmode=driving
 - 股價/匯率/賽程/活動/推薦/任何需要查證的問題 → search_web
