@@ -1,0 +1,24 @@
+{
+  "nannies": [
+    {
+      "id": "wendy",
+      "name": "Wendy",
+      "baseSalary": 40000,
+      "overtimeAllowance": 50000,
+      "leaveDeductFrom": "overtime",
+      "leaveKeyword": "Wendy休假",
+      "notes": "24小時看護，底薪4萬+加班費5萬，請假扣加班費"
+    },
+    {
+      "id": "auntie",
+      "name": "阿姨",
+      "baseSalary": 35000,
+      "overtimeAllowance": 0,
+      "leaveDeductFrom": "base",
+      "leaveKeyword": "阿姨休假",
+      "notes": "一般保母，月薪3.5萬，請假扣日薪"
+    }
+  ],
+  "holidays": {},
+  "updatedAt": "2026-03-06T00:00:00+08:00"
+}

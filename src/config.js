@@ -67,6 +67,12 @@ const config = {
     // 新聞區塊，格式 "region:category:count,..." （例如 "tw:business:3,tw:general:3,world:business:3,world:general:3"）
     newsSections: parseBriefingNews(process.env.BRIEFING_NEWS),
   },
+  // 保母薪資管理（選填）
+  nanny: {
+    configPath: process.env.NANNY_CONFIG_PATH || "./data/nanny-config.json",
+    recordsPath: process.env.NANNY_RECORDS_PATH || "./data/salary-records.json",
+    adminToken: process.env.ADMIN_TOKEN,
+  },
   // 行事曆提醒（選填 — 需行事曆可用）
   eventReminder: {
     minutes: parseInt(process.env.EVENT_REMINDER_MINUTES) || 120, // 預設提前 2 小時

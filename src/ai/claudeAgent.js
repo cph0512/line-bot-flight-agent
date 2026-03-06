@@ -15,7 +15,7 @@ const {
   formatResultsForAI,
   getBookingLinks,
 } = require("../scraper/scraperEngine");
-const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService, commuteService } = require("../services");
+const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService, commuteService, nannyService } = require("../services");
 const logger = require("../utils/logger");
 
 // ========== AI Client 初始化（兩個都初始化）==========
@@ -125,6 +125,7 @@ function getSystemPrompt() {
 - 改行程 → 先 get_events 再 update_event
 - 刪行程/取消 → 先 get_events 再 delete_event
 - ⚠️ eventId 是內部代碼，絕對不要顯示給使用者看。回覆時只說事件名稱和時間，不要附 eventId。
+- 保母薪水/算薪資/Wendy薪水/阿姨薪水 → calculate_nanny_salary
 - 路況/通勤/塞車/開車要多久 → get_commute（回覆會附 Google Maps 導航連結）
 - 路線規劃/導航/Google Maps 連結 → 用此格式產生連結：https://www.google.com/maps/dir/?api=1&origin=起點地址&destination=終點地址&travelmode=driving
 - 股價/匯率/賽程/活動/推薦/任何需要查證的問題 → search_web
@@ -201,10 +202,12 @@ const SEARCH_PATTERNS = [
 const FLIGHT_KEYWORDS = /機票|航班|飛|航空|直飛|轉機|商務艙|經濟艙|頭等艙|來回|單程|訂票/;
 // 通勤相關查詢不走自動搜尋（交給 Gemini 用 get_commute）
 const COMMUTE_KEYWORDS = /路況|通勤|塞車|開車.*多久|上班路|上學路/;
+const NANNY_KEYWORDS = /保母|薪水|薪資|算薪|Wendy.*薪|阿姨.*薪|保姆/i;
 
 function needsWebSearch(message) {
   if (FLIGHT_KEYWORDS.test(message)) return false;
   if (COMMUTE_KEYWORDS.test(message)) return false;
+  if (NANNY_KEYWORDS.test(message)) return false;
   return SEARCH_PATTERNS.some((pattern) => pattern.test(message));
 }
 
@@ -332,6 +335,7 @@ async function runGeminiLoop(history) {
     const lastUserMsg = history[history.length - 1]?.content || "";
     const isToolQuery = FLIGHT_KEYWORDS.test(lastUserMsg) ||
       COMMUTE_KEYWORDS.test(lastUserMsg) ||
+      NANNY_KEYWORDS.test(lastUserMsg) ||
       /天氣|氣溫|下雨|溫度/.test(lastUserMsg) ||
       /新聞|頭條|時事/.test(lastUserMsg) ||
       /晨報|早報|簡報/.test(lastUserMsg) ||
@@ -603,6 +607,31 @@ async function executeTool(name, input) {
     } catch (e) {
       logger.error(`[Tool] get_commute 失敗: ${e.message}`);
       return { text: `通勤路況查詢失敗：${e.message}` };
+    }
+  }
+
+  // ====== 保母薪資工具 ======
+  if (name === "calculate_nanny_salary") {
+    if (!nannyService.isAvailable()) return { text: "保母薪資功能未啟用（未設定保母資料）。" };
+    try {
+      const month = input.month || new Date().toISOString().slice(0, 7);
+      if (input.nannyName) {
+        const allNannies = nannyService.getAllNannies();
+        const match = allNannies.find((n) =>
+          n.name === input.nannyName || n.name.includes(input.nannyName) || input.nannyName.includes(n.name)
+        );
+        if (!match) {
+          const names = allNannies.map((n) => n.name).join("、");
+          return { text: `找不到「${input.nannyName}」。可用保母：${names}` };
+        }
+        const record = await nannyService.calculateMonthlySalary(match.id, month);
+        return { text: nannyService.formatSingleSalary(record) };
+      }
+      const result = await nannyService.calculateAllSalaries(month);
+      return { text: result.text };
+    } catch (e) {
+      logger.error(`[Tool] calculate_nanny_salary 失敗: ${e.message}`);
+      return { text: `保母薪資計算失敗：${e.message}` };
     }
   }
 

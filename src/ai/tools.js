@@ -201,6 +201,18 @@ const tools = [
     },
   },
   {
+    name: "calculate_nanny_salary",
+    description: "計算保母薪水。使用者問保母薪水、算薪水、Wendy薪水、阿姨薪水、保母費用時使用。",
+    input_schema: {
+      type: "object",
+      properties: {
+        nannyName: { type: "string", description: "保母名稱：Wendy 或 阿姨（可選，不指定則算全部）" },
+        month: { type: "string", description: "月份 YYYY-MM 格式，例如 2026-03（可選，預設當月）" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "search_google_flights",
     description: "【主要工具】搜尋機票比價。查航班、查機票、找便宜機票、比價時一律使用此工具。資料來自 Google Flights，票價最即時準確。",
     input_schema: {
