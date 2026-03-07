@@ -168,4 +168,41 @@ router.get("/records", (req, res) => {
   }
 });
 
+// ========== 付款管理 ==========
+
+/**
+ * PUT /api/nanny/records/:id/paid — 標記已發放
+ */
+router.put("/records/:id/paid", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paidAt, amount, note } = req.body || {};
+    const record = nannyService.markAsPaid(id, { paidAt, amount, note });
+    if (record) {
+      res.json({ success: true, record });
+    } else {
+      res.status(404).json({ error: "找不到該薪資紀錄" });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * PUT /api/nanny/records/:id/unpaid — 取消已發放
+ */
+router.put("/records/:id/unpaid", (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = nannyService.markAsUnpaid(id);
+    if (record) {
+      res.json({ success: true, record });
+    } else {
+      res.status(404).json({ error: "找不到該薪資紀錄" });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

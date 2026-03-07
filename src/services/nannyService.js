@@ -374,6 +374,40 @@ function getSalaryRecord(id) {
   return data.records.find((r) => r.id === id) || null;
 }
 
+/**
+ * 標記薪資已發放
+ */
+function markAsPaid(recordId, paymentInfo = {}) {
+  const data = loadRecords();
+  const record = data.records.find((r) => r.id === recordId);
+  if (!record) return null;
+
+  record.paid = true;
+  record.paidAt = paymentInfo.paidAt || new Date().toISOString();
+  record.paidAmount = paymentInfo.amount || record.finalSalary;
+  record.paymentNote = paymentInfo.note || "";
+
+  saveRecords(data);
+  return record;
+}
+
+/**
+ * 取消已發放標記
+ */
+function markAsUnpaid(recordId) {
+  const data = loadRecords();
+  const record = data.records.find((r) => r.id === recordId);
+  if (!record) return null;
+
+  record.paid = false;
+  delete record.paidAt;
+  delete record.paidAmount;
+  delete record.paymentNote;
+
+  saveRecords(data);
+  return record;
+}
+
 module.exports = {
   isAvailable,
   loadConfig,
@@ -390,4 +424,6 @@ module.exports = {
   formatSingleSalary,
   getSalaryRecords,
   getSalaryRecord,
+  markAsPaid,
+  markAsUnpaid,
 };

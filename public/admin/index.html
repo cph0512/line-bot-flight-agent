@@ -105,7 +105,8 @@
     <div class="card">
       <h3>月薪計算</h3>
       <div class="month-selector">
-        <input type="month" id="salaryMonth">
+        <select id="salaryYear" style="min-width:90px"></select>
+        <select id="salaryMonthSelect" style="min-width:80px"></select>
         <button class="btn btn-primary" onclick="calculateSalary()">計算薪資</button>
       </div>
       <div id="salaryResult" class="loading">選擇月份後按計算</div>
@@ -189,6 +190,29 @@
   </div>
 </div>
 
+<!-- Payment Modal -->
+<div class="modal-overlay" id="payModal">
+  <div class="modal">
+    <h3 id="payModalTitle">發放薪資</h3>
+    <div class="form-group">
+      <label>發放日期</label>
+      <input type="date" id="pay_date">
+    </div>
+    <div class="form-group">
+      <label>實付金額（NT$）</label>
+      <input type="number" id="pay_amount">
+    </div>
+    <div class="form-group">
+      <label>備註（選填）</label>
+      <input type="text" id="pay_note" placeholder="例如：轉帳/現金">
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-success" onclick="confirmPay()">確認發放</button>
+      <button class="btn" onclick="closePayModal()" style="background:#eee">取消</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API_BASE = '/api/nanny';
 let token = localStorage.getItem('admin_token') || '';
@@ -224,12 +248,43 @@ function doLogout() {
 async function showApp() {
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  // Default month = current
-  const now = new Date();
-  document.getElementById('salaryMonth').value = now.toISOString().slice(0, 7);
+  // Init year/month dropdowns
+  initMonthSelector();
   loadNannies();
   loadHolidays();
   loadRecords();
+}
+
+function initMonthSelector() {
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+  // Year dropdown: current-1 ~ current+1
+  const yearSelect = document.getElementById('salaryYear');
+  yearSelect.innerHTML = '';
+  for (let y = curYear - 1; y <= curYear + 1; y++) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + ' 年';
+    if (y === curYear) opt.selected = true;
+    yearSelect.appendChild(opt);
+  }
+  // Month dropdown: 1~12
+  const monthSelect = document.getElementById('salaryMonthSelect');
+  monthSelect.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement('option');
+    opt.value = String(m).padStart(2, '0');
+    opt.textContent = m + ' 月';
+    if (m === curMonth) opt.selected = true;
+    monthSelect.appendChild(opt);
+  }
+}
+
+function getSelectedMonth() {
+  const y = document.getElementById('salaryYear').value;
+  const m = document.getElementById('salaryMonthSelect').value;
+  return y + '-' + m;
 }
 
 // ========== Tabs ==========
@@ -241,21 +296,85 @@ function switchTab(name) {
 }
 
 // ========== Salary ==========
+let lastSalaryRecords = [];
+
 async function calculateSalary() {
-  const month = document.getElementById('salaryMonth').value;
+  const month = getSelectedMonth();
   if (!month) return;
   document.getElementById('salaryResult').innerHTML = '<div class="loading">計算中...</div>';
   try {
     const res = await fetch(API_BASE + '/salary/all/' + month, { headers: getHeaders() });
     const data = await res.json();
+    lastSalaryRecords = data.records || [];
     if (data.text) {
-      document.getElementById('salaryResult').innerHTML = '<div class="salary-report">' + escapeHtml(data.text) + '</div>';
+      let html = '<div class="salary-report">' + escapeHtml(data.text) + '</div>';
+      // Payment buttons per nanny
+      if (lastSalaryRecords.length > 0) {
+        html += '<div style="margin-top:16px">';
+        for (const r of lastSalaryRecords) {
+          if (r.error) continue;
+          const isPaid = !!r.paid;
+          html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:8px;background:${isPaid ? '#e8f5e9' : '#fff3e0'};border-radius:8px">`;
+          html += `<div><strong>${escapeHtml(r.nannyName)}</strong> — NT$ ${(r.finalSalary||0).toLocaleString()}</div>`;
+          if (isPaid) {
+            html += `<div style="display:flex;align-items:center;gap:8px"><span class="status status-ok">✅ 已發放 ${r.paidAt ? new Date(r.paidAt).toLocaleDateString('zh-TW') : ''}</span>`;
+            html += `<button class="btn btn-sm" style="background:#eee" onclick="markUnpaid('${r.id}')">撤銷</button></div>`;
+          } else {
+            html += `<button class="btn btn-success btn-sm" onclick="showPayModal('${r.id}','${escapeHtml(r.nannyName)}',${r.finalSalary||0})">💰 標記已發放</button>`;
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      document.getElementById('salaryResult').innerHTML = html;
     } else if (data.error) {
       document.getElementById('salaryResult').innerHTML = '<div style="color:#e53935">' + escapeHtml(data.error) + '</div>';
     }
   } catch (e) {
     document.getElementById('salaryResult').innerHTML = '<div style="color:#e53935">錯誤：' + e.message + '</div>';
   }
+}
+
+// ========== Payment ==========
+let payModalRecordId = '';
+
+function showPayModal(recordId, nannyName, amount) {
+  payModalRecordId = recordId;
+  document.getElementById('payModalTitle').textContent = '發放薪資 — ' + nannyName;
+  document.getElementById('pay_amount').value = amount;
+  document.getElementById('pay_date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('pay_note').value = '';
+  document.getElementById('payModal').classList.add('active');
+}
+
+function closePayModal() {
+  document.getElementById('payModal').classList.remove('active');
+}
+
+async function confirmPay() {
+  const amount = parseInt(document.getElementById('pay_amount').value) || 0;
+  const paidAt = document.getElementById('pay_date').value;
+  const note = document.getElementById('pay_note').value.trim();
+  try {
+    await fetch(API_BASE + '/records/' + encodeURIComponent(payModalRecordId) + '/paid', {
+      method: 'PUT', headers: getHeaders(),
+      body: JSON.stringify({ amount, paidAt: paidAt + 'T00:00:00+08:00', note })
+    });
+    closePayModal();
+    calculateSalary(); // refresh
+    loadRecords(); // refresh history
+  } catch (e) { alert('標記失敗：' + e.message); }
+}
+
+async function markUnpaid(recordId) {
+  if (!confirm('確定撤銷已發放標記？')) return;
+  try {
+    await fetch(API_BASE + '/records/' + encodeURIComponent(recordId) + '/unpaid', {
+      method: 'PUT', headers: getHeaders()
+    });
+    calculateSalary();
+    loadRecords();
+  } catch (e) { alert('撤銷失敗：' + e.message); }
 }
 
 // ========== Nannies ==========
@@ -383,22 +502,34 @@ async function saveHolidays() {
 // ========== Records ==========
 async function loadRecords() {
   try {
-    const res = await fetch(API_BASE + '/records?limit=20', { headers: getHeaders() });
+    const res = await fetch(API_BASE + '/records?limit=50', { headers: getHeaders() });
     const data = await res.json();
     const list = document.getElementById('recordsList');
     if (!data.records || data.records.length === 0) {
       list.innerHTML = '<div class="loading">尚無計算紀錄</div>';
       return;
     }
-    list.innerHTML = '<table><tr><th>月份</th><th>保母</th><th>薪資</th><th>計算時間</th></tr>' +
-      data.records.map(r => `
-        <tr>
-          <td>${r.month}</td>
-          <td>${escapeHtml(r.nannyName||r.nannyId)}</td>
-          <td>NT$ ${(r.finalSalary||0).toLocaleString()}</td>
-          <td>${r.calculatedAt ? new Date(r.calculatedAt).toLocaleString('zh-TW') : '-'}</td>
-        </tr>
-      `).join('') + '</table>';
+    list.innerHTML = '<table><tr><th>月份</th><th>保母</th><th>薪資</th><th>狀態</th><th>發放日期</th><th></th></tr>' +
+      data.records.map(r => {
+        const isPaid = !!r.paid;
+        const statusHtml = isPaid
+          ? '<span class="status status-ok">已發放</span>'
+          : '<span class="status status-warn">未發放</span>';
+        const paidDate = r.paidAt ? new Date(r.paidAt).toLocaleDateString('zh-TW') : '-';
+        const actionHtml = isPaid
+          ? `<button class="btn btn-sm" style="background:#eee" onclick="markUnpaid('${r.id}')">撤銷</button>`
+          : `<button class="btn btn-success btn-sm" onclick="showPayModal('${r.id}','${escapeHtml(r.nannyName||r.nannyId)}',${r.finalSalary||0})">發放</button>`;
+        const noteHtml = r.paymentNote ? `<br><small style="color:#888">${escapeHtml(r.paymentNote)}</small>` : '';
+        return `
+          <tr>
+            <td>${r.month}</td>
+            <td>${escapeHtml(r.nannyName||r.nannyId)}</td>
+            <td>NT$ ${(r.finalSalary||0).toLocaleString()}${r.paidAmount && r.paidAmount !== r.finalSalary ? '<br><small style="color:#e65100">實付 NT$ ' + r.paidAmount.toLocaleString() + '</small>' : ''}</td>
+            <td>${statusHtml}${noteHtml}</td>
+            <td>${paidDate}</td>
+            <td>${actionHtml}</td>
+          </tr>`;
+      }).join('') + '</table>';
   } catch (e) {
     document.getElementById('recordsList').innerHTML = '<div style="color:#e53935">載入失敗</div>';
   }
