@@ -145,8 +145,21 @@
       <div id="calendarContent" class="loading">載入中...</div>
     </div>
     <div class="card">
-      <h3>家庭行事曆</h3>
+      <h3>其他行事曆</h3>
       <div id="familyCalContent" class="loading">載入中...</div>
+    </div>
+    <div class="card">
+      <h3>iPhone / iCalendar 用戶</h3>
+      <div style="font-size:14px;color:#555;line-height:1.8">
+        <p>如果你使用 iPhone 內建行事曆（iCalendar），可以透過以下方式整合：</p>
+        <ol style="padding-left:20px;margin-top:8px">
+          <li><strong>將 iCloud 行事曆同步到 Google</strong><br>
+            <span style="color:#888">iPhone 設定 → 行事曆 → 帳號 → 新增帳號 → Google → 開啟行事曆同步</span></li>
+          <li style="margin-top:8px"><strong>在 Google Calendar 訂閱 iCloud 行事曆</strong><br>
+            <span style="color:#888">從 iCloud.com 取得行事曆的公開連結，貼到 Google Calendar「其他日曆」→「透過網址新增」</span></li>
+        </ol>
+        <p style="margin-top:12px;color:#999;font-size:13px">同步完成後，在 LINE 輸入「綁定行事曆」即可使用 AI 管家查詢行程</p>
+      </div>
     </div>
   </div>
 
@@ -638,7 +651,7 @@ async function loadFamilyCalendars() {
     const el = document.getElementById('familyCalContent');
     const cals = data.calendars || [];
     if (cals.length === 0) {
-      el.innerHTML = '<div class="loading">尚未設定家庭行事曆</div>';
+      el.innerHTML = '<div class="loading">尚未設定其他行事曆</div>';
     } else {
       el.innerHTML = '<table><tr><th>名稱</th><th>Calendar ID</th><th></th></tr>' +
         cals.map(c => `
@@ -651,8 +664,8 @@ async function loadFamilyCalendars() {
     }
     el.innerHTML += `
       <div style="margin-top:12px;display:flex;gap:8px;align-items:end">
-        <div class="form-group" style="flex:1;margin:0"><label>名稱</label><input type="text" id="fc_name" placeholder="例如 老婆"></div>
-        <div class="form-group" style="flex:2;margin:0"><label>Calendar ID</label><input type="text" id="fc_calId" placeholder="email@gmail.com"></div>
+        <div class="form-group" style="flex:1;margin:0"><label>名稱</label><input type="text" id="fc_name" placeholder="例如 老婆、工作、私人"></div>
+        <div class="form-group" style="flex:2;margin:0"><label>Calendar ID</label><input type="text" id="fc_calId" placeholder="email@gmail.com 或 calendarId"></div>
         <button class="btn btn-primary btn-sm" onclick="addFamilyCal()" style="height:36px">新增</button>
       </div>
     `;

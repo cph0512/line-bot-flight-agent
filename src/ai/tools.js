@@ -128,7 +128,7 @@ const tools = [
     input_schema: {
       type: "object",
       properties: {
-        calendarName: { type: "string", description: "行事曆名稱，空=個人，全家=全部" },
+        calendarName: { type: "string", description: "行事曆名稱（如：老婆、工作、私人），空=個人，全部/全家=查所有行事曆" },
         startDate: { type: "string", description: "開始日期 YYYY-MM-DD" },
         endDate: { type: "string", description: "結束日期 YYYY-MM-DD" },
       },

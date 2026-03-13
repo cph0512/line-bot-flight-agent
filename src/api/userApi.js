@@ -101,7 +101,7 @@ router.post("/calendar/disconnect", async (req, res) => {
   }
 });
 
-// ========== 家庭行事曆 ==========
+// ========== 其他行事曆 ==========
 
 router.get("/family-calendars", async (req, res) => {
   if (!req.userId || !isDbAvailable()) return res.json({ calendars: [] });

@@ -65,7 +65,7 @@ model GoogleAuth {
   updatedAt    DateTime @updatedAt
 }
 
-// ===== 家庭行事曆 =====
+// ===== 其他行事曆（工作、家庭、私人等）=====
 model FamilyCalendar {
   id         String @id @default(cuid())
   userId     String

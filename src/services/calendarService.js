@@ -152,7 +152,7 @@ async function getEvents(calendarName, startDate, endDate, dbUserId) {
     const events = await fetchEvents(ctx.client, calId, timeMin, timeMax);
 
     let familyEvents = [];
-    if (!calendarName || calendarName === "全家" || calendarName === "家庭") {
+    if (!calendarName || ["全家", "家庭", "全部", "所有", "all"].includes(calendarName)) {
       for (const fc of ctx.familyCalendars) {
         try {
           const fEvents = await fetchEvents(ctx.client, fc.id, timeMin, timeMax);
