@@ -4,7 +4,7 @@
   "description": "LINE Bot 智能機票助手 - Claude AI + Playwright RPA 航空公司官網爬蟲",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "npx prisma generate && node src/index.js",
     "dev": "nodemon src/index.js",
     "build": "npx prisma generate",
     "postinstall": "npx prisma generate || true",

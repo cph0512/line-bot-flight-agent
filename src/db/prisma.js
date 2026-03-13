@@ -1,11 +1,15 @@
-const { PrismaClient } = require("@prisma/client");
-
 let prisma;
 
 if (process.env.DATABASE_URL) {
-  prisma = new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["warn", "error"],
-  });
+  try {
+    const { PrismaClient } = require("@prisma/client");
+    prisma = new PrismaClient({
+      log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["warn", "error"],
+    });
+  } catch (e) {
+    console.warn("[DB] Prisma client 初始化失敗（可能需要 prisma generate）:", e.message);
+    prisma = null;
+  }
 } else {
   // 沒有 DATABASE_URL 時回傳 null，讓服務可以 graceful fallback
   prisma = null;
