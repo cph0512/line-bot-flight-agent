@@ -60,7 +60,7 @@ router.get("/users", async (req, res) => {
       include: {
         settings: true,
         googleAuth: { select: { email: true, calendarId: true, updatedAt: true } },
-        _count: { select: { aiUsageLogs: true, conversationMessages: true, nannyConfigs: true } },
+        _count: { select: { aiUsageLogs: true, conversations: true, nannyConfigs: true } },
       },
       orderBy: { createdAt: "desc" },
     });
