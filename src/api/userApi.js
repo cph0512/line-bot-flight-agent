@@ -137,6 +137,51 @@ router.delete("/family-calendars/:id", async (req, res) => {
   }
 });
 
+// 從 Google 重新同步行事曆列表
+router.post("/calendar/sync", async (req, res) => {
+  if (!req.userId || !isDbAvailable()) return res.json({ error: "Not available" });
+  try {
+    const { listCalendarsForUser } = require("../auth/googleOAuth");
+    const calendars = await listCalendarsForUser(req.userId);
+    if (!calendars || calendars.length === 0) {
+      return res.json({ synced: 0, calendars: [] });
+    }
+    for (const cal of calendars) {
+      await prisma.familyCalendar.upsert({
+        where: { userId_calendarId: { userId: req.userId, calendarId: cal.calendarId } },
+        update: { name: cal.name },
+        create: {
+          userId: req.userId,
+          name: cal.name,
+          calendarId: cal.calendarId,
+          enabled: true,
+          autoDiscovered: true,
+        },
+      });
+    }
+    const allCals = await prisma.familyCalendar.findMany({ where: { userId: req.userId } });
+    res.json({ synced: calendars.length, calendars: allCals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 啟用/停用行事曆
+router.put("/family-calendars/:id/toggle", async (req, res) => {
+  if (!req.userId || !isDbAvailable()) return res.json({ error: "Not available" });
+  try {
+    const cal = await prisma.familyCalendar.findUnique({ where: { id: req.params.id } });
+    if (!cal || cal.userId !== req.userId) return res.status(404).json({ error: "Not found" });
+    const updated = await prisma.familyCalendar.update({
+      where: { id: req.params.id },
+      data: { enabled: !cal.enabled },
+    });
+    res.json({ calendar: updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ========== AI 用量 ==========
 
 router.get("/ai-usage", async (req, res) => {

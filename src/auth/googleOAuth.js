@@ -61,22 +61,31 @@ async function exchangeCode(code, state) {
   const { tokens } = await client.getToken(code);
   client.setCredentials(tokens);
 
-  // 取得用戶的主要行事曆 ID（通常是 email）
+  // 取得用戶的所有行事曆
   const calendar = google.calendar({ version: "v3", auth: client });
   let calendarId = "primary";
   let email = null;
+  let allCalendars = [];
   try {
-    const calendarList = await calendar.calendarList.list({ maxResults: 1 });
-    const primary = calendarList.data.items?.find((c) => c.primary);
+    const calendarList = await calendar.calendarList.list();
+    const items = calendarList.data.items || [];
+    const primary = items.find((c) => c.primary);
     if (primary) {
       calendarId = primary.id;
-      email = primary.id; // primary calendar ID 通常就是 email
+      email = primary.id;
     }
+    // 收集非主要行事曆（排除只有空閒/忙碌權限的）
+    allCalendars = items
+      .filter((c) => !c.primary && c.accessRole !== "freeBusyReader")
+      .map((c) => ({
+        calendarId: c.id,
+        name: c.summaryOverride || c.summary || c.id,
+      }));
   } catch (e) {
     logger.warn("[OAuth] 無法讀取行事曆列表", { error: e.message });
   }
 
-  return { tokens, lineUserId, calendarId, email };
+  return { tokens, lineUserId, calendarId, email, allCalendars };
 }
 
 /**
@@ -178,6 +187,29 @@ async function unlinkCalendar(userId) {
   await prisma.googleAuth.delete({ where: { userId } }).catch(() => {});
 }
 
+/**
+ * 列出用戶 Google 帳號下的所有行事曆（用於重新同步）
+ * @param {string} dbUserId — DB User.id
+ * @returns {Array} [{ calendarId, name, primary }]
+ */
+async function listCalendarsForUser(dbUserId) {
+  const client = await getCalendarClientForUser(dbUserId);
+  if (!client) return [];
+  try {
+    const calendarList = await client.calendarList.list();
+    const items = calendarList.data.items || [];
+    return items
+      .filter((c) => !c.primary && c.accessRole !== "freeBusyReader")
+      .map((c) => ({
+        calendarId: c.id,
+        name: c.summaryOverride || c.summary || c.id,
+      }));
+  } catch (e) {
+    logger.warn("[OAuth] listCalendarsForUser failed", { error: e.message });
+    return [];
+  }
+}
+
 module.exports = {
   isAvailable,
   generateAuthUrl,
@@ -186,4 +218,5 @@ module.exports = {
   getCalendarClientForUser,
   hasCalendarLinked,
   unlinkCalendar,
+  listCalendarsForUser,
 };

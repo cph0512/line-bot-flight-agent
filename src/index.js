@@ -341,22 +341,51 @@ app.get("/auth/google/callback", async (req, res) => {
   }
 
   try {
-    const { tokens, lineUserId, calendarId, email } = await googleOAuth.exchangeCode(code, state);
+    const { tokens, lineUserId, calendarId, email, allCalendars } = await googleOAuth.exchangeCode(code, state);
     await googleOAuth.saveTokens(lineUserId, tokens, calendarId, email);
 
+    // 自動匯入該帳號下的所有行事曆
+    let syncedCount = 0;
+    if (allCalendars && allCalendars.length > 0) {
+      const user = await prisma.user.findUnique({ where: { lineUserId } });
+      if (user) {
+        for (const cal of allCalendars) {
+          try {
+            await prisma.familyCalendar.upsert({
+              where: { userId_calendarId: { userId: user.id, calendarId: cal.calendarId } },
+              update: { name: cal.name },
+              create: {
+                userId: user.id,
+                name: cal.name,
+                calendarId: cal.calendarId,
+                enabled: true,
+                autoDiscovered: true,
+              },
+            });
+            syncedCount++;
+          } catch (e) {
+            logger.warn(`[OAuth] Auto-sync calendar failed: ${cal.name}`, { error: e.message });
+          }
+        }
+        logger.info(`[OAuth] Auto-discovered ${syncedCount} calendars for user=${lineUserId.slice(-6)}`);
+      }
+    }
+
     // 推播通知用戶綁定成功
+    const calMsg = syncedCount > 0 ? `\n已自動匯入 ${syncedCount} 個行事曆，可到後台管理啟用/停用。` : "";
     try {
       await lineClient.pushMessage(lineUserId, {
         type: "text",
-        text: `✅ Google 行事曆已綁定成功！\n\n📧 帳號：${email || calendarId}\n\n現在你可以直接問我行事曆相關問題，例如：\n• 「今天有什麼行程？」\n• 「幫我新增明天下午 3 點開會」\n• 「下週行程」`,
+        text: `Google 行事曆已綁定成功！\n\n帳號：${email || calendarId}${calMsg}\n\n現在你可以直接問我行事曆相關問題，例如：\n• 「今天有什麼行程？」\n• 「幫我新增明天下午 3 點開會」\n• 「下週行程」`,
       });
     } catch (pushErr) {
       logger.warn("[OAuth] 推播綁定成功通知失敗", { error: pushErr.message });
     }
 
     res.send(`<html><body style="text-align:center;font-family:sans-serif;padding:40px">
-      <h2>✅ 行事曆綁定成功！</h2>
+      <h2>行事曆綁定成功！</h2>
       <p>帳號：${email || calendarId}</p>
+      ${syncedCount > 0 ? `<p>已自動匯入 ${syncedCount} 個行事曆</p>` : ""}
       <p>你可以回到 LINE 開始使用行事曆功能</p>
       <p style="color:#999;margin-top:20px">此頁面可以關閉</p>
     </body></html>`);

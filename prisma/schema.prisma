@@ -67,12 +67,15 @@ model GoogleAuth {
 
 // ===== 其他行事曆（工作、家庭、私人等）=====
 model FamilyCalendar {
-  id         String @id @default(cuid())
-  userId     String
-  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name       String
-  calendarId String
+  id             String  @id @default(cuid())
+  userId         String
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  calendarId     String
+  enabled        Boolean @default(true)
+  autoDiscovered Boolean @default(false)
 
+  @@unique([userId, calendarId])
   @@index([userId])
 }
 

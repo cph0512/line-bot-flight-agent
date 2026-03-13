@@ -84,7 +84,7 @@ async function getUserCalendarContext(dbUserId) {
         const oauthClient = await getCalendarClientForUser(dbUserId);
         if (oauthClient) {
           const googleAuth = await prisma.googleAuth.findUnique({ where: { userId: dbUserId } });
-          const familyCals = await prisma.familyCalendar.findMany({ where: { userId: dbUserId } });
+          const familyCals = await prisma.familyCalendar.findMany({ where: { userId: dbUserId, enabled: true } });
           return {
             client: oauthClient,
             calendarId: googleAuth?.calendarId || "primary",
