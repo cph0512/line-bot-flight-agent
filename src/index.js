@@ -309,6 +309,21 @@ app.get("/auth/google/start", (req, res) => {
 
   try {
     const url = googleOAuth.generateAuthUrl(payload.lineUserId);
+
+    // 偵測 LINE 內建瀏覽器（WebView）— Google 封鎖 WebView OAuth
+    const ua = req.headers["user-agent"] || "";
+    if (/Line\//i.test(ua)) {
+      const currentUrl = `${config.app.url}/auth/google/start?token=${token}`;
+      return res.send(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>綁定 Google 行事曆</title>
+<style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px}.card{background:#1e293b;border-radius:16px;padding:32px 24px;max-width:360px;text-align:center}h2{font-size:20px;margin-bottom:12px;color:#f59e0b}p{font-size:14px;color:#94a3b8;line-height:1.6;margin-bottom:20px}.btn{display:block;background:#f59e0b;color:#0f172a;padding:14px 24px;border-radius:10px;font-size:16px;font-weight:600;text-decoration:none;margin-bottom:16px}.hint{font-size:12px;color:#64748b;line-height:1.5}.copy-area{background:#0f172a;border-radius:8px;padding:10px;margin:12px 0;word-break:break-all;font-size:11px;color:#94a3b8}.copy-btn{background:#334155;color:#e2e8f0;border:none;padding:8px 16px;border-radius:6px;font-size:12px;cursor:pointer;margin-top:8px}</style></head>
+<body><div class="card"><h2>綁定 Google 行事曆</h2><p>Google 要求在外部瀏覽器中完成授權</p>
+<a class="btn" href="${currentUrl}" target="_blank">在瀏覽器中開啟</a>
+<div class="hint">如果按鈕無效，請點右下角 <strong>⋮</strong> 選單<br>→「<strong>在預設瀏覽器中開啟</strong>」</div>
+<div class="copy-area" id="u">${currentUrl}</div>
+<button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('u').textContent).then(()=>this.textContent='已複製！')">複製連結</button>
+</div></body></html>`);
+    }
+
     res.redirect(url);
   } catch (e) {
     logger.error("[OAuth] 產生授權 URL 失敗", { error: e.message });
