@@ -85,6 +85,7 @@ model UserSettings {
   timezone            String  @default("Asia/Taipei")
   eventReminderMin    Int     @default(120)
   eventReminderOrigin String?
+  enabledModules      String  @default("[]")
 }
 
 // ===== 晨報設定 =====

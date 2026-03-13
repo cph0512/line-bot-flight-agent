@@ -33,6 +33,19 @@ async function main() {
     });
     console.log(`✅ Owner 用戶已建立: ${owner.id} (${ownerLineId.slice(-6)})`);
 
+    // Owner 預設開啟 nanny 模組
+    await prisma.userSettings.upsert({
+      where: { userId: owner.id },
+      update: { enabledModules: JSON.stringify(["nanny"]) },
+      create: {
+        userId: owner.id,
+        defaultCity: process.env.DEFAULT_CITY || "臺北市",
+        timezone: process.env.TZ || "Asia/Taipei",
+        enabledModules: JSON.stringify(["nanny"]),
+      },
+    });
+    console.log("  ✅ Owner nanny 模組已啟用");
+
     // 2. 遷移保母設定
     const nannyConfigPath = process.env.NANNY_CONFIG_PATH || "./data/nanny-config.json";
     if (fs.existsSync(nannyConfigPath)) {

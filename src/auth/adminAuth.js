@@ -96,4 +96,23 @@ async function adminAuthMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { generateAdminToken, verifyAdminToken, adminAuthMiddleware };
+/**
+ * 超級管理員 middleware（僅 Owner 可訪問）
+ * 需在 adminAuthMiddleware 之後使用
+ */
+async function superAdminMiddleware(req, res, next) {
+  // 先確認已通過基本認證
+  if (!req.user) {
+    return res.status(401).json({ error: "未認證" });
+  }
+
+  // 檢查是否為 Owner
+  if (!config.app.ownerLineUserId || req.user.lineUserId !== config.app.ownerLineUserId) {
+    return res.status(403).json({ error: "僅限超級管理員" });
+  }
+
+  req.isSuperAdmin = true;
+  next();
+}
+
+module.exports = { generateAdminToken, verifyAdminToken, adminAuthMiddleware, superAdminMiddleware };

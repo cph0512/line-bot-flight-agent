@@ -134,6 +134,22 @@ async function handleSingleEvent(event) {
     });
   }
 
+  // === 超級管理後台（僅 Owner）===
+  if (!isGroup && ["超級後台", "super admin", "superadmin"].includes(text.toLowerCase())) {
+    if (isDbAvailable() && lineUserId && userService.isSuperAdmin(lineUserId)) {
+      const token = generateAdminToken(lineUserId);
+      const superUrl = `${config.app.url}/admin/super.html?token=${token}`;
+      return lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: "text", text: `超級管理後台（24小時有效）：\n\n${superUrl}` }],
+      });
+    }
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: "此功能僅限超級管理員使用。" }],
+    });
+  }
+
   // === 後台管理連結 ===
   if (!isGroup && ["後台", "管理", "admin", "設定"].includes(text.toLowerCase())) {
     if (isDbAvailable() && lineUserId) {

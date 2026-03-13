@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>超級管理後台</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    .header { background: #1e293b; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+    .header h1 { font-size: 18px; color: #f59e0b; }
+    .header .user-info { font-size: 13px; color: #94a3b8; }
+    .tabs { display: flex; gap: 0; background: #1e293b; padding: 0 24px; border-bottom: 1px solid #334155; }
+    .tab { padding: 12px 20px; cursor: pointer; color: #94a3b8; font-size: 14px; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab:hover { color: #e2e8f0; }
+    .tab.active { color: #f59e0b; border-bottom-color: #f59e0b; }
+    .content { padding: 24px; max-width: 1000px; margin: 0 auto; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 16px; border: 1px solid #334155; }
+    .card h3 { font-size: 15px; color: #f59e0b; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 12px; color: #94a3b8; border-bottom: 1px solid #334155; font-weight: 500; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .badge-active { background: #065f46; color: #6ee7b7; }
+    .badge-pending { background: #78350f; color: #fbbf24; }
+    .badge-suspended { background: #7f1d1d; color: #fca5a5; }
+    .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s; }
+    .btn-primary { background: #f59e0b; color: #0f172a; }
+    .btn-primary:hover { background: #d97706; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-success { background: #059669; color: white; }
+    .btn-success:hover { background: #047857; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    input, select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+    input:focus, select:focus { outline: none; border-color: #f59e0b; }
+    .form-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    .form-row label { font-size: 13px; color: #94a3b8; min-width: 60px; }
+    .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+    .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #f59e0b; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat-card { background: #0f172a; border-radius: 8px; padding: 16px; text-align: center; border: 1px solid #334155; }
+    .stat-card .value { font-size: 28px; font-weight: 700; color: #f59e0b; }
+    .stat-card .label { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+    .loading { text-align: center; padding: 40px; color: #64748b; }
+    .empty { text-align: center; padding: 20px; color: #64748b; font-size: 13px; }
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 1000; animation: fadeIn 0.3s; }
+    .toast-success { background: #065f46; color: #6ee7b7; }
+    .toast-error { background: #7f1d1d; color: #fca5a5; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>超級管理後台</h1>
+    <div class="user-info" id="userInfo"></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('users')">用戶管理</div>
+    <div class="tab" onclick="switchTab('codes')">邀請碼</div>
+    <div class="tab" onclick="switchTab('usage')">AI 用量</div>
+  </div>
+
+  <div class="content">
+    <!-- 用戶管理 -->
+    <div class="tab-content active" id="tab-users">
+      <div class="card">
+        <h3>用戶列表</h3>
+        <div id="usersLoading" class="loading">載入中...</div>
+        <table id="usersTable" style="display:none">
+          <thead>
+            <tr>
+              <th>用戶</th>
+              <th>狀態</th>
+              <th>模組</th>
+              <th>行事曆</th>
+              <th>AI 次數</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 邀請碼管理 -->
+    <div class="tab-content" id="tab-codes">
+      <div class="card">
+        <h3>新增邀請碼</h3>
+        <div class="form-row">
+          <label>碼</label>
+          <input type="text" id="newCode" placeholder="例如 FRIEND2026" style="width:180px">
+          <label>次數</label>
+          <input type="number" id="newCodeMax" value="5" min="1" style="width:80px">
+          <button class="btn btn-primary" onclick="createCode()">新增</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>現有邀請碼</h3>
+        <div id="codesLoading" class="loading">載入中...</div>
+        <table id="codesTable" style="display:none">
+          <thead>
+            <tr>
+              <th>邀請碼</th>
+              <th>使用量</th>
+              <th>到期日</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="codesBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- AI 用量 -->
+    <div class="tab-content" id="tab-usage">
+      <div class="stat-grid" id="usageStats"></div>
+      <div class="card">
+        <h3>依用戶用量（近 30 天）</h3>
+        <div id="usageLoading" class="loading">載入中...</div>
+        <table id="usageTable" style="display:none">
+          <thead>
+            <tr>
+              <th>用戶</th>
+              <th>呼叫次數</th>
+              <th>Input Tokens</th>
+              <th>Output Tokens</th>
+              <th>估計費用</th>
+            </tr>
+          </thead>
+          <tbody id="usageBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let token = '';
+    const OPTIONAL_MODULES = ['nanny'];
+
+    // 初始化
+    (function init() {
+      const params = new URLSearchParams(location.search);
+      token = params.get('token') || localStorage.getItem('superToken') || '';
+      if (!token) {
+        document.querySelector('.content').innerHTML = '<div class="loading">未提供認證 token，請從 LINE Bot 取得超級後台連結。</div>';
+        return;
+      }
+      localStorage.setItem('superToken', token);
+      loadAll();
+    })();
+
+    function api(path, options = {}) {
+      return fetch(path, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      }).then(async r => {
+        if (r.status === 403) {
+          document.querySelector('.content').innerHTML = '<div class="loading">權限不足：僅限超級管理員。</div>';
+          throw new Error('Forbidden');
+        }
+        if (r.status === 401) {
+          localStorage.removeItem('superToken');
+          document.querySelector('.content').innerHTML = '<div class="loading">Token 已過期，請重新從 LINE Bot 取得連結。</div>';
+          throw new Error('Unauthorized');
+        }
+        return r.json();
+      });
+    }
+
+    function toast(msg, type = 'success') {
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + name).classList.add('active');
+    }
+
+    async function loadAll() {
+      loadUsers();
+      loadCodes();
+      loadUsage();
+    }
+
+    // ========== 用戶管理 ==========
+    async function loadUsers() {
+      try {
+        const data = await api('/api/admin/users');
+        const users = data.users || [];
+        document.getElementById('usersLoading').style.display = 'none';
+        document.getElementById('usersTable').style.display = 'table';
+
+        const tbody = document.getElementById('usersBody');
+        tbody.innerHTML = users.map(u => {
+          const modules = parseModules(u.settings?.enabledModules);
+          const statusBadge = u.status === 'ACTIVE' ? 'badge-active' : u.status === 'PENDING' ? 'badge-pending' : 'badge-suspended';
+          const calendarEmail = u.googleAuth?.email || '-';
+
+          return `<tr>
+            <td>
+              <strong>${u.displayName || '未知'}</strong>
+              <br><span style="font-size:11px;color:#64748b">${u.lineUserId.slice(-8)}</span>
+            </td>
+            <td><span class="badge ${statusBadge}">${u.status}</span></td>
+            <td>
+              ${OPTIONAL_MODULES.map(m => `
+                <label class="checkbox-label">
+                  <input type="checkbox" ${modules.includes(m) ? 'checked' : ''} onchange="toggleModule('${u.id}', '${m}', this.checked, '${u.lineUserId}')">
+                  ${m === 'nanny' ? '保母薪資' : m}
+                </label>
+              `).join('')}
+            </td>
+            <td style="font-size:12px">${calendarEmail}</td>
+            <td>${u._count?.aiUsageLogs || 0}</td>
+            <td>
+              ${u.status === 'ACTIVE'
+                ? `<button class="btn btn-danger btn-sm" onclick="changeStatus('${u.id}', 'SUSPENDED')">停用</button>`
+                : `<button class="btn btn-success btn-sm" onclick="changeStatus('${u.id}', 'ACTIVE')">啟用</button>`
+              }
+            </td>
+          </tr>`;
+        }).join('');
+
+        document.getElementById('userInfo').textContent = `${users.length} 位用戶`;
+      } catch (e) {
+        if (e.message !== 'Forbidden' && e.message !== 'Unauthorized') {
+          document.getElementById('usersLoading').textContent = '載入失敗';
+        }
+      }
+    }
+
+    function parseModules(str) {
+      try { return JSON.parse(str || '[]'); } catch { return []; }
+    }
+
+    async function toggleModule(userId, module, enabled, lineUserId) {
+      try {
+        // 取得當前模組
+        const data = await api('/api/admin/users');
+        const user = (data.users || []).find(u => u.id === userId);
+        let current = parseModules(user?.settings?.enabledModules);
+
+        if (enabled && !current.includes(module)) {
+          current.push(module);
+        } else if (!enabled) {
+          current = current.filter(m => m !== module);
+        }
+
+        await api(`/api/admin/users/${userId}/modules`, {
+          method: 'PUT',
+          body: JSON.stringify({ modules: current }),
+        });
+        toast(`已${enabled ? '開啟' : '關閉'} ${module} 模組`);
+      } catch (e) {
+        toast('操作失敗：' + e.message, 'error');
+        loadUsers(); // 重載還原
+      }
+    }
+
+    async function changeStatus(userId, status) {
+      try {
+        await api(`/api/admin/users/${userId}/status`, {
+          method: 'PUT',
+          body: JSON.stringify({ status }),
+        });
+        toast(`用戶已${status === 'ACTIVE' ? '啟用' : '停用'}`);
+        loadUsers();
+      } catch (e) {
+        toast('操作失敗：' + e.message, 'error');
+      }
+    }
+
+    // ========== 邀請碼 ==========
+    async function loadCodes() {
+      try {
+        const data = await api('/api/admin/invitation-codes');
+        const codes = data.codes || [];
+        document.getElementById('codesLoading').style.display = 'none';
+        document.getElementById('codesTable').style.display = 'table';
+
+        const tbody = document.getElementById('codesBody');
+        if (codes.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" class="empty">尚無邀請碼</td></tr>';
+          return;
+        }
+        tbody.innerHTML = codes.map(c => `<tr>
+          <td><strong>${c.code}</strong></td>
+          <td>${c.usedCount} / ${c.maxUses}</td>
+          <td>${c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '永久'}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteCode('${c.code}')">刪除</button></td>
+        </tr>`).join('');
+      } catch (e) {
+        if (e.message !== 'Forbidden' && e.message !== 'Unauthorized') {
+          document.getElementById('codesLoading').textContent = '載入失敗';
+        }
+      }
+    }
+
+    async function createCode() {
+      const code = document.getElementById('newCode').value.trim();
+      const maxUses = parseInt(document.getElementById('newCodeMax').value) || 5;
+      if (!code) return toast('請輸入邀請碼', 'error');
+
+      try {
+        await api('/api/admin/invitation-codes', {
+          method: 'POST',
+          body: JSON.stringify({ code, maxUses }),
+        });
+        document.getElementById('newCode').value = '';
+        toast('邀請碼已建立');
+        loadCodes();
+      } catch (e) {
+        toast('建立失敗：' + e.message, 'error');
+      }
+    }
+
+    async function deleteCode(code) {
+      if (!confirm(`確定刪除邀請碼 ${code}？`)) return;
+      try {
+        await api(`/api/admin/invitation-codes/${code}`, { method: 'DELETE' });
+        toast('已刪除');
+        loadCodes();
+      } catch (e) {
+        toast('刪除失敗', 'error');
+      }
+    }
+
+    // ========== AI 用量 ==========
+    async function loadUsage() {
+      try {
+        const data = await api('/api/admin/ai-usage/summary?days=30');
+        const usage = data.usage || {};
+        document.getElementById('usageLoading').style.display = 'none';
+        document.getElementById('usageTable').style.display = 'table';
+
+        // 統計卡片
+        const stats = document.getElementById('usageStats');
+        stats.innerHTML = `
+          <div class="stat-card">
+            <div class="value">${formatNum(usage.totalCalls || 0)}</div>
+            <div class="label">API 呼叫次數</div>
+          </div>
+          <div class="stat-card">
+            <div class="value">${formatTokens(usage.totalTokens || 0)}</div>
+            <div class="label">總 Token 用量</div>
+          </div>
+          <div class="stat-card">
+            <div class="value">$${(usage.totalCost || 0).toFixed(3)}</div>
+            <div class="label">估計費用 (USD)</div>
+          </div>
+        `;
+
+        // 用戶明細
+        const tbody = document.getElementById('usageBody');
+        const byUser = usage.byUser || [];
+        if (byUser.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">近 30 天無用量</td></tr>';
+          return;
+        }
+        tbody.innerHTML = byUser.map(u => `<tr>
+          <td>${u.displayName || u.userId?.slice(-8) || '未知'}</td>
+          <td>${formatNum(u.calls)}</td>
+          <td>${formatTokens(u.inputTokens)}</td>
+          <td>${formatTokens(u.outputTokens)}</td>
+          <td>$${(u.cost || 0).toFixed(3)}</td>
+        </tr>`).join('');
+      } catch (e) {
+        if (e.message !== 'Forbidden' && e.message !== 'Unauthorized') {
+          document.getElementById('usageLoading').textContent = '載入失敗';
+        }
+      }
+    }
+
+    function formatNum(n) { return n.toLocaleString(); }
+    function formatTokens(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toString();
+    }
+  </script>
+</body>
+</html>

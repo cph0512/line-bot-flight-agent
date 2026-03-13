@@ -19,6 +19,7 @@ const { weatherService, newsService, calendarService, briefingService, webSearch
 const logger = require("../utils/logger");
 const aiUsageService = require("../services/aiUsageService");
 const userService = require("../services/userService");
+const { prisma } = require("../db/prisma");
 
 // ========== AI Client 初始化（兩個都初始化）==========
 let genAI = null;
@@ -83,6 +84,23 @@ function convertToolsToGemini(tools) {
 }
 
 const geminiTools = genAI ? convertToolsToGemini(anthropicTools) : null;
+
+// 需要 nanny 模組的工具名稱
+const NANNY_TOOLS = ["calculate_nanny_salary"];
+
+/**
+ * 根據用戶模組過濾工具清單
+ */
+async function filterToolsForUser(lineUserId) {
+  const hasNanny = await userService.hasModule(lineUserId, "nanny");
+  if (hasNanny) return { anthropic: anthropicTools, gemini: geminiTools };
+
+  const filtered = anthropicTools.filter((t) => !NANNY_TOOLS.includes(t.name));
+  return {
+    anthropic: filtered,
+    gemini: genAI ? convertToolsToGemini(filtered) : null,
+  };
+}
 
 /**
  * 系統提示（精簡版，Gemini 和 Anthropic 共用）
@@ -226,6 +244,7 @@ async function handleMessage(userId, userMessage) {
 
   // 解析 DB User ID（多租戶用）
   const dbUserId = await userService.getDbUserId(userId).catch(() => null);
+  const lineUserId = userId; // LINE userId，模組檢查用
 
   try {
     // ====== 自動搜尋：偵測到即時資訊需求，先搜再給 AI ======
@@ -260,7 +279,7 @@ async function handleMessage(userId, userMessage) {
     if (geminiAvailable) {
       // 先嘗試 Gemini
       try {
-        response = await runGeminiLoop(history, dbUserId);
+        response = await runGeminiLoop(history, dbUserId, lineUserId);
       } catch (error) {
         // 429 或其他 Gemini 錯誤
         if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || error.message?.includes("quota")) {
@@ -269,7 +288,7 @@ async function handleMessage(userId, userMessage) {
 
           if (fallbackEnabled && anthropicAvailable) {
             logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
-            response = await runAnthropicLoop(history, dbUserId);
+            response = await runAnthropicLoop(history, dbUserId, lineUserId);
           } else {
             return { text: "⚠️ Gemini 免費額度已用完，請稍後再試（約 1 分鐘後重置）。" };
           }
@@ -278,7 +297,7 @@ async function handleMessage(userId, userMessage) {
           logger.error(`[AI] Gemini 錯誤: ${error.message}`);
           if (fallbackEnabled && anthropicAvailable) {
             logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
-            response = await runAnthropicLoop(history, dbUserId);
+            response = await runAnthropicLoop(history, dbUserId, lineUserId);
           } else {
             return { text: `⚠️ Gemini 處理失敗：${error.message}\n\n請再試一次，或換個方式問問看 🙏` };
           }
@@ -290,7 +309,7 @@ async function handleMessage(userId, userMessage) {
       if (geminiCooldownUntil > now) {
         logger.info(`[AI] Gemini 冷卻中（還剩 ${cooldownRemain}s），使用 Anthropic`);
       }
-      response = await runAnthropicLoop(history, dbUserId);
+      response = await runAnthropicLoop(history, dbUserId, lineUserId);
     } else if (geminiCooldownUntil > now) {
       // Gemini 冷卻中，fallback 未啟用
       const cooldownRemain = Math.max(0, Math.ceil((geminiCooldownUntil - now) / 1000));
@@ -321,7 +340,7 @@ async function handleMessage(userId, userMessage) {
 // ================================================================
 // Gemini Agent Loop
 // ================================================================
-async function runGeminiLoop(history, dbUserId) {
+async function runGeminiLoop(history, dbUserId, lineUserId) {
   let iterations = 5;
   let lastFlights = null;
   let lastInboundFlights = null;
@@ -331,6 +350,9 @@ async function runGeminiLoop(history, dbUserId) {
   );
 
   const toolsUsedInSession = [];
+
+  // 根據用戶模組過濾工具
+  const userTools = await filterToolsForUser(lineUserId);
 
   const agentWork = async () => {
     const contents = history.map((msg) => ({
@@ -350,7 +372,7 @@ async function runGeminiLoop(history, dbUserId) {
 
     const geminiConfig = {
       systemInstruction: getSystemPrompt(),
-      tools: geminiTools,
+      tools: userTools.gemini,
       toolConfig: {
         functionCallingConfig: {
           mode: isToolQuery ? "ANY" : "AUTO",  // 工具型查詢強制使用工具
@@ -451,7 +473,7 @@ async function runGeminiLoop(history, dbUserId) {
 // ================================================================
 // Anthropic Agent Loop
 // ================================================================
-async function runAnthropicLoop(history, dbUserId) {
+async function runAnthropicLoop(history, dbUserId, lineUserId) {
   const messages = [...history];
   let iterations = 5;
   let lastFlights = null;
@@ -462,6 +484,9 @@ async function runAnthropicLoop(history, dbUserId) {
     setTimeout(() => reject(new Error("AI 處理超時（55 秒）")), 55000)
   );
 
+  // 根據用戶模組過濾工具
+  const userTools = await filterToolsForUser(lineUserId);
+
   const agentWork = async () => {
     while (iterations-- > 0) {
       logger.info(`[AI] Anthropic (${config.anthropic.model}) 迴圈=${iterations + 1}`);
@@ -470,7 +495,7 @@ async function runAnthropicLoop(history, dbUserId) {
         model: config.anthropic.model,
         max_tokens: 2000,
         system: getSystemPrompt(),
-        tools: anthropicTools,
+        tools: userTools.anthropic,
         messages,
       });
 
@@ -633,6 +658,13 @@ async function executeTool(name, input, dbUserId) {
   // ====== 保母薪資工具 ======
   if (name === "calculate_nanny_salary") {
     if (!nannyService.isAvailable()) return { text: "保母薪資功能未啟用（未設定保母資料）。" };
+    // 模組門控：需要 nanny 模組
+    if (dbUserId) {
+      const user = await prisma?.user?.findUnique({ where: { id: dbUserId }, select: { lineUserId: true } });
+      if (user && !(await userService.hasModule(user.lineUserId, "nanny"))) {
+        return { text: "此功能未開啟，請聯繫管理員開通保母薪資模組。" };
+      }
+    }
     try {
       const month = input.month || new Date().toISOString().slice(0, 7);
       if (input.nannyName) {

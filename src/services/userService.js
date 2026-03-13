@@ -1,5 +1,11 @@
 const { prisma, isDbAvailable } = require("../db/prisma");
+const { config } = require("../config");
 const logger = require("../utils/logger");
+
+// 所有人自動擁有的基礎模組
+const DEFAULT_MODULES = ["calendar", "weather", "news", "commute", "briefing", "flight"];
+// 需要 Owner 手動開啟的可選模組
+const OPTIONAL_MODULES = ["nanny"];
 
 /**
  * 自動建立或取得用戶
@@ -150,10 +156,73 @@ async function getDbUserId(lineUserId) {
   return user?.id || null;
 }
 
+/**
+ * 取得用戶的所有啟用模組（預設 + 自訂）
+ */
+async function getModules(lineUserId) {
+  if (!isDbAvailable()) return [...DEFAULT_MODULES, ...OPTIONAL_MODULES]; // DB 不可用時全開
+
+  const user = await prisma.user.findUnique({
+    where: { lineUserId },
+    include: { settings: true },
+  });
+
+  if (!user?.settings) return [...DEFAULT_MODULES];
+
+  try {
+    const extra = JSON.parse(user.settings.enabledModules || "[]");
+    return [...DEFAULT_MODULES, ...extra];
+  } catch {
+    return [...DEFAULT_MODULES];
+  }
+}
+
+/**
+ * 檢查用戶是否啟用特定模組
+ */
+async function hasModule(lineUserId, moduleName) {
+  if (DEFAULT_MODULES.includes(moduleName)) return true;
+  const modules = await getModules(lineUserId);
+  return modules.includes(moduleName);
+}
+
+/**
+ * 設定用戶的可選模組（僅超級管理員呼叫）
+ * @param {string} userId — DB user ID
+ * @param {string[]} modules — 可選模組清單 e.g. ["nanny"]
+ */
+async function setModules(userId, modules) {
+  if (!isDbAvailable()) return false;
+
+  // 只保留合法的可選模組
+  const valid = modules.filter((m) => OPTIONAL_MODULES.includes(m));
+
+  await prisma.userSettings.upsert({
+    where: { userId },
+    update: { enabledModules: JSON.stringify(valid) },
+    create: { userId, enabledModules: JSON.stringify(valid) },
+  });
+
+  return true;
+}
+
+/**
+ * 檢查是否為超級管理員（Owner）
+ */
+function isSuperAdmin(lineUserId) {
+  return config.app.ownerLineUserId && lineUserId === config.app.ownerLineUserId;
+}
+
 module.exports = {
   findOrCreateUser,
   activateUser,
   getUserByLineId,
   isActivated,
   getDbUserId,
+  getModules,
+  hasModule,
+  setModules,
+  isSuperAdmin,
+  DEFAULT_MODULES,
+  OPTIONAL_MODULES,
 };

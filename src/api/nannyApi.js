@@ -10,28 +10,23 @@ const logger = require("../utils/logger");
 const { config } = require("../config");
 const nannyService = require("../services/nannyService");
 const { getHolidays: getBuiltinHolidays } = require("../utils/taiwanHolidays");
+const { adminAuthMiddleware } = require("../auth/adminAuth");
+const userService = require("../services/userService");
 
-// ========== 認證中間件 ==========
+// ========== 認證中間件（支援 JWT + 舊 ADMIN_TOKEN）==========
 
-function authMiddleware(req, res, next) {
-  const token = config.nanny?.adminToken;
-  if (!token) {
-    return res.status(500).json({ error: "ADMIN_TOKEN 未設定" });
+router.use(adminAuthMiddleware);
+
+// 模組檢查：需要 nanny 模組
+async function requireNannyModule(req, res, next) {
+  if (req.user) {
+    const has = await userService.hasModule(req.user.lineUserId, "nanny");
+    if (!has) return res.status(403).json({ error: "保母薪資模組未開啟" });
   }
-
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "需要認證" });
-  }
-
-  if (auth.slice(7) !== token) {
-    return res.status(403).json({ error: "認證失敗" });
-  }
-
   next();
 }
 
-router.use(authMiddleware);
+router.use(requireNannyModule);
 
 // ========== 保母管理 ==========
 

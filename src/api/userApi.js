@@ -3,6 +3,7 @@ const router = express.Router();
 const { adminAuthMiddleware } = require("../auth/adminAuth");
 const { prisma, isDbAvailable } = require("../db/prisma");
 const aiUsageService = require("../services/aiUsageService");
+const userService = require("../services/userService");
 
 // 所有路由需要認證
 router.use(adminAuthMiddleware);
@@ -55,6 +56,18 @@ router.put("/settings", async (req, res) => {
       data,
     });
     res.json({ settings });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ========== 模組清單（唯讀）==========
+
+router.get("/modules", async (req, res) => {
+  if (!req.user) return res.json({ modules: [] });
+  try {
+    const modules = await userService.getModules(req.user.lineUserId);
+    res.json({ modules });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

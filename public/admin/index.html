@@ -112,14 +112,14 @@
     </div>
   </header>
 
-  <div class="tabs">
+  <div class="tabs" id="mainTabs">
     <div class="tab active" onclick="switchTab('settings')">設定</div>
     <div class="tab" onclick="switchTab('calendar')">行事曆</div>
     <div class="tab" onclick="switchTab('ai-usage')">AI 用量</div>
-    <div class="tab" onclick="switchTab('salary')">薪資計算</div>
-    <div class="tab" onclick="switchTab('nannies')">保母管理</div>
-    <div class="tab" onclick="switchTab('holidays')">國定假日</div>
-    <div class="tab" onclick="switchTab('records')">歷史紀錄</div>
+    <div class="tab nanny-tab" onclick="switchTab('salary')" style="display:none">薪資計算</div>
+    <div class="tab nanny-tab" onclick="switchTab('nannies')" style="display:none">保母管理</div>
+    <div class="tab nanny-tab" onclick="switchTab('holidays')" style="display:none">國定假日</div>
+    <div class="tab nanny-tab" onclick="switchTab('records')" style="display:none">歷史紀錄</div>
   </div>
 
   <!-- Settings Tab -->
@@ -368,9 +368,24 @@ async function showApp() {
   loadCalendarStatus();
   loadFamilyCalendars();
   loadAiUsage();
-  loadNannies();
-  loadHolidays();
-  loadRecords();
+  // 檢查模組權限，決定是否顯示保母分頁
+  loadModulesAndShowTabs();
+}
+
+async function loadModulesAndShowTabs() {
+  try {
+    const res = await fetch(USER_API + '/modules', { headers: getHeaders() });
+    const data = await res.json();
+    const modules = data.modules || [];
+    if (modules.includes('nanny')) {
+      document.querySelectorAll('.nanny-tab').forEach(el => el.style.display = '');
+      loadNannies();
+      loadHolidays();
+      loadRecords();
+    }
+  } catch (e) {
+    // 模組 API 失敗時不顯示保母分頁
+  }
 }
 
 async function loadProfile() {
