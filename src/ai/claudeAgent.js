@@ -447,7 +447,7 @@ async function runGeminiLoop(history, dbUserId, lineUserId) {
         logger.info(`[AI] >>> 工具: ${fc.name}`, { args: JSON.stringify(fc.args) });
         toolsUsedInSession.push(fc.name);
         const startTime = Date.now();
-        const result = await executeTool(fc.name, fc.args || {}, dbUserId);
+        const result = await executeTool(fc.name, fc.args || {}, dbUserId, lineUserId);
         logger.info(`[AI] <<< 完成: ${fc.name} (${Date.now() - startTime}ms)`);
 
         if (result.flights?.length > 0) lastFlights = result.flights;
@@ -521,7 +521,7 @@ async function runAnthropicLoop(history, dbUserId, lineUserId) {
           logger.info(`[AI] >>> 工具: ${tu.name}`);
           toolsUsedInSession.push(tu.name);
           const startTime = Date.now();
-          const result = await executeTool(tu.name, tu.input, dbUserId);
+          const result = await executeTool(tu.name, tu.input, dbUserId, lineUserId);
           logger.info(`[AI] <<< 完成: ${tu.name} (${Date.now() - startTime}ms)`);
 
           if (result.flights?.length > 0) lastFlights = result.flights;
@@ -552,7 +552,7 @@ async function runAnthropicLoop(history, dbUserId, lineUserId) {
 // ================================================================
 // 執行工具（共用）
 // ================================================================
-async function executeTool(name, input, dbUserId) {
+async function executeTool(name, input, dbUserId, lineUserId) {
   logger.info(`[Tool] ${name}`, { input: JSON.stringify(input) });
 
   const flightTools = ["search_all_flights", "search_cash_only", "search_miles_only", "get_booking_links"];
@@ -635,7 +635,29 @@ async function executeTool(name, input, dbUserId) {
   }
 
   if (name === "trigger_briefing") {
-    if (!briefingService.isAvailable()) return { text: "每日晨報功能未啟用（未設定 BRIEFING_RECIPIENTS）。" };
+    // Per-user briefing: send to requesting user only
+    if (dbUserId && prisma) {
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: dbUserId },
+          include: { briefingConfig: true, googleAuth: true, settings: true },
+        });
+        if (user) {
+          const briefingConfig = user.briefingConfig || {
+            cities: user.settings?.defaultCity || "臺北市",
+            newsSections: "tw:general:5",
+          };
+          const schedulerService = require("../services/schedulerService");
+          await schedulerService.triggerBriefingForUser(user, briefingConfig);
+          return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };
+        }
+      } catch (e) {
+        logger.error(`[Tool] trigger_briefing per-user failed: ${e.message}`);
+        return { text: `晨報推送失敗：${e.message}` };
+      }
+    }
+    // Fallback: legacy global briefing
+    if (!briefingService.isAvailable()) return { text: "每日晨報功能未啟用。請先在後台設定晨報。" };
     try {
       await briefingService.triggerBriefing();
       return { text: "已成功推送今日晨報！請查看 LINE 訊息。" };

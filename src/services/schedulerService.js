@@ -406,4 +406,4 @@ function formatTimeUntil(minutes) {
   return `${minutes} 分鐘`;
 }
 
-module.exports = { initScheduler };
+module.exports = { initScheduler, triggerBriefingForUser };
