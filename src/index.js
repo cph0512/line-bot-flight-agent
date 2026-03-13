@@ -1,14 +1,18 @@
 const express = require("express");
 const path = require("path");
 const { config, validateConfig } = require("./config");
-const { lineMiddleware } = require("./line/lineClient");
+const { lineMiddleware, lineClient } = require("./line/lineClient");
 const { handleWebhookEvents } = require("./line/lineHandler");
 const { shutdown, testBrowserLaunch } = require("./scraper/browserManager");
 const amadeusClient = require("./scraper/amadeusClient");
 const flightApi = require("./api/flightApi");
 const nannyApi = require("./api/nannyApi");
+const userApi = require("./api/userApi");
+const adminApi = require("./api/adminApi");
 const { weatherService, newsService, calendarService, briefingService, googleFlightsService, commuteService, eventReminderService, nannyService } = require("./services");
 const logger = require("./utils/logger");
+const { prisma, isDbAvailable, testConnection, disconnect } = require("./db/prisma");
+const googleOAuth = require("./auth/googleOAuth");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
 process.on("uncaughtException", (err) => {
@@ -45,6 +49,8 @@ app.get("/", (req, res) => {
     commute: commuteService.isAvailable() ? "enabled" : "disabled",
     eventReminder: eventReminderService.isAvailable() ? `enabled (${config.eventReminder?.minutes || 120}min)` : "disabled",
     nanny: nannyService.isAvailable() ? `enabled (${nannyService.getAllNannies().length} nannies)` : "disabled",
+    database: isDbAvailable() ? "connected" : "not configured",
+    googleOAuth: googleOAuth.isAvailable() ? "enabled" : "disabled",
   });
 });
 
@@ -287,11 +293,75 @@ app.post("/webhook", lineMiddleware, async (req, res) => {
   }
 });
 
+// ========== Google OAuth 2.0 行事曆綁定 ==========
+app.get("/auth/google/start", (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(400).send("缺少 token 參數");
+
+  if (!googleOAuth.isAvailable()) {
+    return res.status(503).send("Google OAuth 未設定，請聯繫管理員");
+  }
+
+  // 驗證 JWT 取得 lineUserId
+  const { verifyAdminToken } = require("./auth/adminAuth");
+  const payload = verifyAdminToken(token);
+  if (!payload) return res.status(401).send("Token 無效或已過期，請重新從 LINE 取得連結");
+
+  try {
+    const url = googleOAuth.generateAuthUrl(payload.lineUserId);
+    res.redirect(url);
+  } catch (e) {
+    logger.error("[OAuth] 產生授權 URL 失敗", { error: e.message });
+    res.status(500).send("OAuth 錯誤：" + e.message);
+  }
+});
+
+app.get("/auth/google/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error) {
+    return res.send(`<html><body><h2>授權已取消</h2><p>${error}</p><p>你可以關閉此頁面</p></body></html>`);
+  }
+  if (!code || !state) {
+    return res.status(400).send("缺少必要參數");
+  }
+
+  try {
+    const { tokens, lineUserId, calendarId, email } = await googleOAuth.exchangeCode(code, state);
+    await googleOAuth.saveTokens(lineUserId, tokens, calendarId, email);
+
+    // 推播通知用戶綁定成功
+    try {
+      await lineClient.pushMessage(lineUserId, {
+        type: "text",
+        text: `✅ Google 行事曆已綁定成功！\n\n📧 帳號：${email || calendarId}\n\n現在你可以直接問我行事曆相關問題，例如：\n• 「今天有什麼行程？」\n• 「幫我新增明天下午 3 點開會」\n• 「下週行程」`,
+      });
+    } catch (pushErr) {
+      logger.warn("[OAuth] 推播綁定成功通知失敗", { error: pushErr.message });
+    }
+
+    res.send(`<html><body style="text-align:center;font-family:sans-serif;padding:40px">
+      <h2>✅ 行事曆綁定成功！</h2>
+      <p>帳號：${email || calendarId}</p>
+      <p>你可以回到 LINE 開始使用行事曆功能</p>
+      <p style="color:#999;margin-top:20px">此頁面可以關閉</p>
+    </body></html>`);
+  } catch (e) {
+    logger.error("[OAuth] Callback 處理失敗", { error: e.message });
+    res.status(500).send(`<html><body style="text-align:center;font-family:sans-serif;padding:40px">
+      <h2>❌ 綁定失敗</h2>
+      <p>${e.message}</p>
+      <p>請回到 LINE 重新嘗試</p>
+    </body></html>`);
+  }
+});
+
 // ========== LIFF 小程式（靜態檔案）+ 航班 API ==========
 // express.json() 放在 webhook 之後，避免影響 LINE 簽名驗證
 app.use("/api", express.json());
 app.use("/api/flights", flightApi);
 app.use("/api/nanny", nannyApi);
+app.use("/api/user", userApi);
+app.use("/api/admin", adminApi);
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.use((err, req, res, next) => {
@@ -328,8 +398,21 @@ app.listen(config.server.port, () => {
   console.log(`  行程提醒: ${eventReminderService.isAvailable() ? "✅ 每 5 分鐘掃描，提前 " + (config.eventReminder?.minutes || 120) + " 分鐘提醒" : "⬜ 未設定"}`);
   console.log(`  保母薪資: ${nannyService.isAvailable() ? "✅ " + nannyService.getAllNannies().length + " 位保母" : "⬜ 未設定"}`);
   console.log(`  後台管理: ${config.nanny?.adminToken ? "✅ /admin" : "⬜ 未設定 ADMIN_TOKEN"}`);
+  console.log(`  資料庫:   ${isDbAvailable() ? "✅ PostgreSQL 已連線" : "⬜ 未設定 DATABASE_URL"}`);
+  console.log(`  OAuth:    ${googleOAuth.isAvailable() ? "✅ Google OAuth 已設定" : "⬜ 未設定"}`);
   console.log("=".repeat(55));
   console.log("  支援航空: CI / BR / JX / EK / TK / CX / SQ\n");
+
+  // DB 連線測試
+  if (isDbAvailable()) {
+    testConnection().then((result) => {
+      if (result.success) {
+        console.log("[DB] PostgreSQL 連線成功");
+      } else {
+        console.error("[DB] PostgreSQL 連線失敗:", result.error);
+      }
+    });
+  }
 
   // 啟動晨報排程
   if (briefingService.isAvailable()) {
@@ -343,17 +426,19 @@ app.listen(config.server.port, () => {
   if (eventReminderService.isAvailable()) {
     eventReminderService.initCron();
   }
+
+  // 啟動 per-user 排程器（DB-based）
+  const { initScheduler } = require("./services/schedulerService");
+  initScheduler();
 });
 
 // 優雅關閉
-process.on("SIGINT", async () => {
-  logger.info("收到 SIGINT，正在關閉...");
+async function gracefulShutdown(signal) {
+  logger.info(`收到 ${signal}，正在關閉...`);
   await shutdown();
+  await disconnect();
   process.exit(0);
-});
+}
 
-process.on("SIGTERM", async () => {
-  logger.info("收到 SIGTERM，正在關閉...");
-  await shutdown();
-  process.exit(0);
-});
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

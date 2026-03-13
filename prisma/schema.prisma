@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== 用戶 =====
+model User {
+  id          String     @id @default(cuid())
+  lineUserId  String     @unique
+  displayName String?
+  pictureUrl  String?
+  status      UserStatus @default(PENDING)
+  activatedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  googleAuth      GoogleAuth?
+  settings        UserSettings?
+  nannyConfigs    NannyConfig[]
+  salaryRecords   SalaryRecord[]
+  conversations   ConversationMessage[]
+  aiUsageLogs     AiUsageLog[]
+  commuteRoutes   CommuteRoute[]
+  briefingConfig  BriefingConfig?
+  familyCalendars FamilyCalendar[]
+  customHolidays  CustomHoliday[]
+
+  @@index([lineUserId])
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+// ===== 邀請碼 =====
+model InvitationCode {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  maxUses   Int       @default(1)
+  usedCount Int       @default(0)
+  expiresAt DateTime?
+  createdBy String?
+  createdAt DateTime  @default(now())
+
+  @@index([code])
+}
+
+// ===== Google OAuth =====
+model GoogleAuth {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  tokenExpiry  DateTime
+  email        String?
+  calendarId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ===== 家庭行事曆 =====
+model FamilyCalendar {
+  id         String @id @default(cuid())
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  calendarId String
+
+  @@index([userId])
+}
+
+// ===== 用戶設定 =====
+model UserSettings {
+  id                  String  @id @default(cuid())
+  userId              String  @unique
+  user                User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultCity         String  @default("臺北市")
+  timezone            String  @default("Asia/Taipei")
+  eventReminderMin    Int     @default(120)
+  eventReminderOrigin String?
+}
+
+// ===== 晨報設定 =====
+model BriefingConfig {
+  id       String  @id @default(cuid())
+  userId   String  @unique
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enabled  Boolean @default(false)
+  time     String  @default("07:00")
+  cities   String  @default("臺北市")
+  newsSections String @default("tw:general:5")
+}
+
+// ===== 通勤路線 =====
+model CommuteRoute {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  origin      String
+  destination String
+  enabled     Boolean @default(true)
+  notifyTime  String  @default("08:15")
+  weekdayOnly Boolean @default(true)
+
+  @@index([userId])
+}
+
+// ===== 保母設定 =====
+model NannyConfig {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nannyId           String
+  name              String
+  baseSalary        Int     @default(0)
+  overtimeAllowance Int     @default(0)
+  leaveDeductFrom   String  @default("base")
+  leaveKeyword      String?
+  notes             String?
+
+  salaryRecords SalaryRecord[]
+
+  @@unique([userId, nannyId])
+  @@index([userId])
+}
+
+// ===== 薪資紀錄 =====
+model SalaryRecord {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nannyConfigId       String
+  nannyConfig         NannyConfig @relation(fields: [nannyConfigId], references: [id], onDelete: Cascade)
+  month               String
+  baseSalary          Int
+  overtimeAllowance   Int
+  daysInMonth         Int
+  leaveDaysCount      Int
+  leaveDeduction      Int
+  holidaysWorkedCount Int
+  holidayBonus        Int
+  finalSalary         Int
+  leaveDaysJson       String    @db.Text
+  holidaysJson        String    @db.Text
+  paid                Boolean   @default(false)
+  paidAt              DateTime?
+  paidAmount          Int?
+  paymentNote         String?
+  calculatedAt        DateTime  @default(now())
+
+  @@unique([userId, nannyConfigId, month])
+  @@index([userId])
+}
+
+// ===== AI 用量追蹤 =====
+model AiUsageLog {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String
+  model         String
+  inputTokens   Int
+  outputTokens  Int
+  totalTokens   Int
+  estimatedCost Float    @default(0)
+  toolsUsed     String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ===== 對話紀錄 =====
+model ConversationMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ===== 自訂假日 =====
+model CustomHoliday {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  year   Int
+  date   String
+  name   String
+
+  @@unique([userId, date])
+  @@index([userId, year])
+}

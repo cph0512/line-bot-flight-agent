@@ -17,6 +17,8 @@ const {
 } = require("../scraper/scraperEngine");
 const { weatherService, newsService, calendarService, briefingService, webSearchService, googleFlightsService, commuteService, nannyService } = require("../services");
 const logger = require("../utils/logger");
+const aiUsageService = require("../services/aiUsageService");
+const userService = require("../services/userService");
 
 // ========== AI Client 初始化（兩個都初始化）==========
 let genAI = null;
@@ -222,6 +224,9 @@ async function handleMessage(userId, userMessage) {
   history.push({ role: "user", content: userMessage });
   while (history.length > MAX_HISTORY) history.shift();
 
+  // 解析 DB User ID（多租戶用）
+  const dbUserId = await userService.getDbUserId(userId).catch(() => null);
+
   try {
     // ====== 自動搜尋：偵測到即時資訊需求，先搜再給 AI ======
     let searchHint = "";
@@ -255,7 +260,7 @@ async function handleMessage(userId, userMessage) {
     if (geminiAvailable) {
       // 先嘗試 Gemini
       try {
-        response = await runGeminiLoop(history);
+        response = await runGeminiLoop(history, dbUserId);
       } catch (error) {
         // 429 或其他 Gemini 錯誤
         if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || error.message?.includes("quota")) {
@@ -264,7 +269,7 @@ async function handleMessage(userId, userMessage) {
 
           if (fallbackEnabled && anthropicAvailable) {
             logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
-            response = await runAnthropicLoop(history);
+            response = await runAnthropicLoop(history, dbUserId);
           } else {
             return { text: "⚠️ Gemini 免費額度已用完，請稍後再試（約 1 分鐘後重置）。" };
           }
@@ -273,7 +278,7 @@ async function handleMessage(userId, userMessage) {
           logger.error(`[AI] Gemini 錯誤: ${error.message}`);
           if (fallbackEnabled && anthropicAvailable) {
             logger.info("[AI] Fallback 已啟用，切換到 Anthropic");
-            response = await runAnthropicLoop(history);
+            response = await runAnthropicLoop(history, dbUserId);
           } else {
             return { text: `⚠️ Gemini 處理失敗：${error.message}\n\n請再試一次，或換個方式問問看 🙏` };
           }
@@ -285,7 +290,7 @@ async function handleMessage(userId, userMessage) {
       if (geminiCooldownUntil > now) {
         logger.info(`[AI] Gemini 冷卻中（還剩 ${cooldownRemain}s），使用 Anthropic`);
       }
-      response = await runAnthropicLoop(history);
+      response = await runAnthropicLoop(history, dbUserId);
     } else if (geminiCooldownUntil > now) {
       // Gemini 冷卻中，fallback 未啟用
       const cooldownRemain = Math.max(0, Math.ceil((geminiCooldownUntil - now) / 1000));
@@ -316,7 +321,7 @@ async function handleMessage(userId, userMessage) {
 // ================================================================
 // Gemini Agent Loop
 // ================================================================
-async function runGeminiLoop(history) {
+async function runGeminiLoop(history, dbUserId) {
   let iterations = 5;
   let lastFlights = null;
   let lastInboundFlights = null;
@@ -324,6 +329,8 @@ async function runGeminiLoop(history) {
   const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("AI 處理超時（55 秒）")), 55000)
   );
+
+  const toolsUsedInSession = [];
 
   const agentWork = async () => {
     const contents = history.map((msg) => ({
@@ -387,6 +394,11 @@ async function runGeminiLoop(history) {
       const gemUsage = response.usageMetadata || {};
       logger.info(`[AI] Gemini 回應: functionCalls=${functionCalls.length} hasText=${!!response.text} grounded=${wasGrounded} searchQueries=${JSON.stringify(searchQueries)} | tokens: in=${gemUsage.promptTokenCount || "?"} out=${gemUsage.candidatesTokenCount || "?"} total=${gemUsage.totalTokenCount || "?"}`);
 
+      // AI 用量追蹤（非同步，不阻塞）
+      if (dbUserId && gemUsage.promptTokenCount) {
+        aiUsageService.saveUsage(dbUserId, "gemini", config.gemini.model, gemUsage.promptTokenCount || 0, gemUsage.candidatesTokenCount || 0, toolsUsedInSession).catch(() => {});
+      }
+
       if (functionCalls.length === 0) {
         let text = response.text || "抱歉，我不太理解。試試：「台灣新聞」「台北天氣」「晨報」";
 
@@ -411,8 +423,9 @@ async function runGeminiLoop(history) {
       const functionResponseParts = [];
       for (const fc of functionCalls) {
         logger.info(`[AI] >>> 工具: ${fc.name}`, { args: JSON.stringify(fc.args) });
+        toolsUsedInSession.push(fc.name);
         const startTime = Date.now();
-        const result = await executeTool(fc.name, fc.args || {});
+        const result = await executeTool(fc.name, fc.args || {}, dbUserId);
         logger.info(`[AI] <<< 完成: ${fc.name} (${Date.now() - startTime}ms)`);
 
         if (result.flights?.length > 0) lastFlights = result.flights;
@@ -438,10 +451,11 @@ async function runGeminiLoop(history) {
 // ================================================================
 // Anthropic Agent Loop
 // ================================================================
-async function runAnthropicLoop(history) {
+async function runAnthropicLoop(history, dbUserId) {
   const messages = [...history];
   let iterations = 5;
   let lastFlights = null;
+  const toolsUsedInSession = [];
   let lastInboundFlights = null;
 
   const timeout = new Promise((_, reject) =>
@@ -464,6 +478,11 @@ async function runAnthropicLoop(history) {
       const usage = res.usage || {};
       logger.info(`[AI] Anthropic 回應: stop_reason=${res.stop_reason} | tokens: in=${usage.input_tokens || "?"} out=${usage.output_tokens || "?"} total=${(usage.input_tokens || 0) + (usage.output_tokens || 0)}`);
 
+      // AI 用量追蹤（非同步，不阻塞）
+      if (dbUserId && usage.input_tokens) {
+        aiUsageService.saveUsage(dbUserId, "anthropic", config.anthropic.model, usage.input_tokens || 0, usage.output_tokens || 0, toolsUsedInSession).catch(() => {});
+      }
+
       if (res.stop_reason === "end_turn") {
         const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
         return { text, flights: lastFlights, inboundFlights: lastInboundFlights };
@@ -475,8 +494,9 @@ async function runAnthropicLoop(history) {
 
         for (const tu of res.content.filter((b) => b.type === "tool_use")) {
           logger.info(`[AI] >>> 工具: ${tu.name}`);
+          toolsUsedInSession.push(tu.name);
           const startTime = Date.now();
-          const result = await executeTool(tu.name, tu.input);
+          const result = await executeTool(tu.name, tu.input, dbUserId);
           logger.info(`[AI] <<< 完成: ${tu.name} (${Date.now() - startTime}ms)`);
 
           if (result.flights?.length > 0) lastFlights = result.flights;
@@ -507,7 +527,7 @@ async function runAnthropicLoop(history) {
 // ================================================================
 // 執行工具（共用）
 // ================================================================
-async function executeTool(name, input) {
+async function executeTool(name, input, dbUserId) {
   logger.info(`[Tool] ${name}`, { input: JSON.stringify(input) });
 
   const flightTools = ["search_all_flights", "search_cash_only", "search_miles_only", "get_booking_links"];
@@ -568,25 +588,25 @@ async function executeTool(name, input) {
   }
 
   if (name === "get_events") {
-    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用（未設定 Google Calendar）。" };
-    return await calendarService.getEvents(input.calendarName, input.startDate, input.endDate);
+    if (!dbUserId && !calendarService.isAvailable()) return { text: "行事曆功能未啟用。請先綁定 Google 行事曆。" };
+    return await calendarService.getEvents(input.calendarName, input.startDate, input.endDate, dbUserId);
   }
   if (name === "add_event") {
-    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
-    return await calendarService.addEvent(input.calendarName, input.summary, input.startTime, input.endTime, input.description);
+    if (!dbUserId && !calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
+    return await calendarService.addEvent(input.calendarName, input.summary, input.startTime, input.endTime, input.description, dbUserId);
   }
   if (name === "update_event") {
-    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
+    if (!dbUserId && !calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
     const updates = {};
     if (input.summary) updates.summary = input.summary;
     if (input.startTime) updates.startTime = input.startTime;
     if (input.endTime) updates.endTime = input.endTime;
     if (input.description) updates.description = input.description;
-    return await calendarService.updateEvent(input.eventId, input.calendarName, updates);
+    return await calendarService.updateEvent(input.eventId, input.calendarName, updates, dbUserId);
   }
   if (name === "delete_event") {
-    if (!calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
-    return await calendarService.deleteEvent(input.eventId, input.calendarName);
+    if (!dbUserId && !calendarService.isAvailable()) return { text: "行事曆功能未啟用。" };
+    return await calendarService.deleteEvent(input.eventId, input.calendarName, dbUserId);
   }
 
   if (name === "trigger_briefing") {

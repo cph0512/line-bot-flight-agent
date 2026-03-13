@@ -1,11 +1,9 @@
 // =============================================
 // Google Calendar 行事曆服務
 //
-// 使用 Service Account 存取多人日曆
-// 設定步驟：
-// 1. GCP Console → 建立 Service Account → 下載 JSON 金鑰
-// 2. 每個家人的 Google Calendar → 設定 → 分享給 Service Account email
-// 3. .env 設定 GOOGLE_SERVICE_ACCOUNT_KEY_FILE + GOOGLE_CALENDAR_ID
+// 支援兩種認證模式：
+// 1. Service Account（全域，向下相容）
+// 2. Per-user OAuth 2.0（多租戶 SaaS）
 // =============================================
 
 const { google } = require("googleapis");
@@ -14,6 +12,8 @@ const { config } = require("../config");
 
 let authClient = null;
 
+// ========== Service Account 認證（向下相容）==========
+
 function getAuth() {
   if (authClient) return authClient;
 
@@ -21,16 +21,12 @@ function getAuth() {
   const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
   if (keyJson) {
-    // Railway / 雲端部署：直接從環境變數讀取 JSON 金鑰內容
-    // Railway 會把 private_key 中的 \\n 轉成真實換行，需要修復回來
     try {
       let cleaned = keyJson;
-      // 如果 JSON.parse 直接失敗，嘗試修復換行問題
       let credentials;
       try {
         credentials = JSON.parse(cleaned);
       } catch {
-        // 把 private_key 欄位內的真實換行修復為 \\n
         cleaned = cleaned.replace(/\n/g, "\\n");
         credentials = JSON.parse(cleaned);
       }
@@ -46,7 +42,6 @@ function getAuth() {
   }
 
   if (keyFile) {
-    // 本地開發：從檔案路徑讀取
     authClient = new google.auth.GoogleAuth({
       keyFile,
       scopes: ["https://www.googleapis.com/auth/calendar"],
@@ -63,39 +58,87 @@ function getCalendarClient() {
   return google.calendar({ version: "v3", auth });
 }
 
+// ========== 可用性檢查 ==========
+
+/**
+ * 全域 Service Account 是否可用
+ */
 function isAvailable() {
   const hasKey = !!(config.calendar?.keyFile || process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
   return !!(hasKey && config.calendar?.calendarId);
 }
 
 /**
- * 解析行事曆名稱 → calendar ID
+ * 取得用戶的 calendar client（優先 OAuth，fallback Service Account）
+ * @param {string|null} dbUserId — DB User.id
+ * @returns {Object} { client, calendarId, familyCalendars }
  */
-function resolveCalendar(calendarName) {
-  if (!calendarName || calendarName === "我" || calendarName === "我的" || calendarName === "個人") {
-    return config.calendar.calendarId;
+async function getUserCalendarContext(dbUserId) {
+  // 嘗試 per-user OAuth
+  if (dbUserId) {
+    try {
+      const { getCalendarClientForUser } = require("../auth/googleOAuth");
+      const { prisma } = require("../db/prisma");
+
+      if (prisma) {
+        const oauthClient = await getCalendarClientForUser(dbUserId);
+        if (oauthClient) {
+          const googleAuth = await prisma.googleAuth.findUnique({ where: { userId: dbUserId } });
+          const familyCals = await prisma.familyCalendar.findMany({ where: { userId: dbUserId } });
+          return {
+            client: oauthClient,
+            calendarId: googleAuth?.calendarId || "primary",
+            familyCalendars: familyCals.map((c) => ({ name: c.name, id: c.calendarId })),
+            mode: "oauth",
+          };
+        }
+      }
+    } catch (e) {
+      logger.warn(`[Calendar] OAuth fallback: ${e.message}`);
+    }
   }
 
-  // 搜尋家庭行事曆
-  const family = config.calendar.familyCalendars || [];
+  // Fallback: Service Account
+  if (!isAvailable()) return null;
+  return {
+    client: getCalendarClient(),
+    calendarId: config.calendar.calendarId,
+    familyCalendars: config.calendar.familyCalendars || [],
+    mode: "service-account",
+  };
+}
+
+// ========== 行事曆名稱解析 ==========
+
+function resolveCalendar(calendarName, ctx) {
+  if (!calendarName || calendarName === "我" || calendarName === "我的" || calendarName === "個人") {
+    return ctx.calendarId;
+  }
+
+  const family = ctx.familyCalendars || [];
   const match = family.find(
     (c) => c.name === calendarName || c.name.includes(calendarName) || calendarName.includes(c.name)
   );
-  return match?.id || config.calendar.calendarId;
+  return match?.id || ctx.calendarId;
 }
+
+// ========== 公開 API ==========
 
 /**
  * 查詢行程
+ * @param {string} calendarName
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {string|null} dbUserId — DB User.id（多租戶模式）
  */
-async function getEvents(calendarName, startDate, endDate) {
-  if (!isAvailable()) {
-    return { text: "行事曆功能未啟用（未設定 Google Service Account）。\n請參考開發文件設定 GOOGLE_SERVICE_ACCOUNT_KEY_FILE。" };
+async function getEvents(calendarName, startDate, endDate, dbUserId) {
+  const ctx = await getUserCalendarContext(dbUserId);
+  if (!ctx) {
+    return { text: "行事曆功能未啟用。請先綁定 Google 行事曆。" };
   }
 
-  const calendar = getCalendarClient();
-  const calId = resolveCalendar(calendarName);
+  const calId = resolveCalendar(calendarName, ctx);
 
-  // 日期預設：今天
   const today = new Date().toISOString().slice(0, 10);
   const start = startDate || today;
   const end = endDate || start;
@@ -103,18 +146,16 @@ async function getEvents(calendarName, startDate, endDate) {
   const timeMin = new Date(`${start}T00:00:00+08:00`).toISOString();
   const timeMax = new Date(`${end}T23:59:59+08:00`).toISOString();
 
-  logger.info(`[Calendar] 查詢行程 ${calId.slice(0, 20)}... ${start} ~ ${end}`);
+  logger.info(`[Calendar] 查詢行程 ${calId.slice(0, 20)}... ${start} ~ ${end} (${ctx.mode})`);
 
   try {
-    // 查個人行事曆
-    const events = await fetchEvents(calendar, calId, timeMin, timeMax);
+    const events = await fetchEvents(ctx.client, calId, timeMin, timeMax);
 
-    // 如果有查全家
     let familyEvents = [];
     if (!calendarName || calendarName === "全家" || calendarName === "家庭") {
-      for (const fc of config.calendar.familyCalendars || []) {
+      for (const fc of ctx.familyCalendars) {
         try {
-          const fEvents = await fetchEvents(calendar, fc.id, timeMin, timeMax);
+          const fEvents = await fetchEvents(ctx.client, fc.id, timeMin, timeMax);
           familyEvents.push(...fEvents.map((e) => ({ ...e, calendarLabel: fc.name })));
         } catch (e) {
           logger.warn(`[Calendar] ${fc.name} 行事曆查詢失敗: ${e.message}`);
@@ -132,11 +173,9 @@ async function getEvents(calendarName, startDate, endDate) {
     let text = `=== 行程 (${start}${start !== end ? ` ~ ${end}` : ""}) ===\n`;
     text += `共 ${allEvents.length} 個事件\n`;
 
-    // 判斷是否跨多天（需要顯示日期）
     const isMultiDay = start !== end;
 
     for (const evt of allEvents) {
-      // 取得事件日期（用於多天查詢時顯示）
       const evtDate = evt.start ? evt.start.slice(0, 10) : "";
       const datePrefix = isMultiDay && evtDate ? `${evtDate} ` : "";
       const timeStr = evt.allDay ? `${datePrefix}全天` : `${datePrefix}${evt.startTime}-${evt.endTime}`;
@@ -154,21 +193,20 @@ async function getEvents(calendarName, startDate, endDate) {
 }
 
 /**
- * 新增事件（含衝突偵測）
+ * 新增事件
  */
-async function addEvent(calendarName, summary, startTime, endTime, description) {
-  if (!isAvailable()) {
-    return { text: "行事曆功能未啟用。" };
+async function addEvent(calendarName, summary, startTime, endTime, description, dbUserId) {
+  const ctx = await getUserCalendarContext(dbUserId);
+  if (!ctx) {
+    return { text: "行事曆功能未啟用。請先綁定 Google 行事曆。" };
   }
 
-  const calendar = getCalendarClient();
-  const calId = resolveCalendar(calendarName);
+  const calId = resolveCalendar(calendarName, ctx);
 
-  logger.info(`[Calendar] 新增事件: ${summary} ${startTime} ~ ${endTime}`);
+  logger.info(`[Calendar] 新增事件: ${summary} ${startTime} ~ ${endTime} (${ctx.mode})`);
 
   try {
-    // 判斷是否全天事件
-    const isAllDay = startTime.length === 10; // YYYY-MM-DD
+    const isAllDay = startTime.length === 10;
 
     const event = {
       summary,
@@ -185,19 +223,19 @@ async function addEvent(calendarName, summary, startTime, endTime, description) 
 
     // 衝突偵測
     if (!isAllDay) {
-      const conflicts = await checkConflicts(calendar, calId, event.start.dateTime, event.end.dateTime);
+      const conflicts = await checkConflicts(ctx.client, calId, event.start.dateTime, event.end.dateTime);
       if (conflicts.length > 0) {
         const conflictList = conflicts.map((c) => `  - ${c.startTime}-${c.endTime} ${c.summary}`).join("\n");
         logger.info(`[Calendar] 偵測到 ${conflicts.length} 個衝突事件`);
 
-        const res = await calendar.events.insert({ calendarId: calId, resource: event });
+        const res = await ctx.client.events.insert({ calendarId: calId, resource: event });
         return {
           text: `⚠️ 注意：有 ${conflicts.length} 個時間衝突的事件：\n${conflictList}\n\n已新增事件「${summary}」[id:${res.data.id}]`,
         };
       }
     }
 
-    const res = await calendar.events.insert({ calendarId: calId, resource: event });
+    const res = await ctx.client.events.insert({ calendarId: calId, resource: event });
     const dateLabel = isAllDay ? startTime : startTime.slice(0, 16).replace("T", " ");
     return { text: `已新增事件「${summary}」在 ${dateLabel} [id:${res.data.id}]` };
   } catch (error) {
@@ -209,15 +247,15 @@ async function addEvent(calendarName, summary, startTime, endTime, description) 
 /**
  * 更新事件
  */
-async function updateEvent(eventId, calendarName, updates) {
-  if (!isAvailable()) {
+async function updateEvent(eventId, calendarName, updates, dbUserId) {
+  const ctx = await getUserCalendarContext(dbUserId);
+  if (!ctx) {
     return { text: "行事曆功能未啟用。" };
   }
 
-  const calendar = getCalendarClient();
-  const calId = resolveCalendar(calendarName);
+  const calId = resolveCalendar(calendarName, ctx);
 
-  logger.info(`[Calendar] 更新事件 ${eventId}`);
+  logger.info(`[Calendar] 更新事件 ${eventId} (${ctx.mode})`);
 
   try {
     const patch = {};
@@ -236,7 +274,7 @@ async function updateEvent(eventId, calendarName, updates) {
         : { dateTime: ensureTimezone(updates.endTime), timeZone: "Asia/Taipei" };
     }
 
-    await calendar.events.patch({
+    await ctx.client.events.patch({
       calendarId: calId,
       eventId,
       resource: patch,
@@ -253,25 +291,24 @@ async function updateEvent(eventId, calendarName, updates) {
 /**
  * 刪除事件
  */
-async function deleteEvent(eventId, calendarName) {
-  if (!isAvailable()) {
+async function deleteEvent(eventId, calendarName, dbUserId) {
+  const ctx = await getUserCalendarContext(dbUserId);
+  if (!ctx) {
     return { text: "行事曆功能未啟用。" };
   }
 
-  const calendar = getCalendarClient();
-  const calId = resolveCalendar(calendarName);
+  const calId = resolveCalendar(calendarName, ctx);
 
-  logger.info(`[Calendar] 刪除事件 ${eventId}`);
+  logger.info(`[Calendar] 刪除事件 ${eventId} (${ctx.mode})`);
 
   try {
-    // 先取得事件資訊
     let eventTitle = eventId;
     try {
-      const evt = await calendar.events.get({ calendarId: calId, eventId });
+      const evt = await ctx.client.events.get({ calendarId: calId, eventId });
       eventTitle = evt.data.summary || eventId;
     } catch {}
 
-    await calendar.events.delete({ calendarId: calId, eventId });
+    await ctx.client.events.delete({ calendarId: calId, eventId });
     return { text: `已刪除事件「${eventTitle}」` };
   } catch (error) {
     logger.error(`[Calendar] 刪除事件失敗: ${error.message}`);
@@ -279,7 +316,44 @@ async function deleteEvent(eventId, calendarName) {
   }
 }
 
-// === 內部工具函式 ===
+/**
+ * 取得原始事件陣列（供內部服務使用）
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {string|null} dbUserId — DB User.id
+ */
+async function getRawEvents(startDate, endDate, dbUserId) {
+  const ctx = await getUserCalendarContext(dbUserId);
+  if (!ctx) return [];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const start = startDate || today;
+  const end = endDate || start;
+
+  const timeMin = new Date(`${start}T00:00:00+08:00`).toISOString();
+  const timeMax = new Date(`${end}T23:59:59+08:00`).toISOString();
+
+  try {
+    const events = await fetchEvents(ctx.client, ctx.calendarId, timeMin, timeMax);
+
+    for (const fc of ctx.familyCalendars) {
+      try {
+        const fEvents = await fetchEvents(ctx.client, fc.id, timeMin, timeMax);
+        events.push(...fEvents.map((e) => ({ ...e, calendarLabel: fc.name })));
+      } catch (e) {
+        logger.warn(`[Calendar] getRawEvents: ${fc.name} 查詢失敗: ${e.message}`);
+      }
+    }
+
+    events.sort((a, b) => new Date(a.start) - new Date(b.start));
+    return events;
+  } catch (error) {
+    logger.error(`[Calendar] getRawEvents 失敗: ${error.message}`);
+    return [];
+  }
+}
+
+// ========== 內部工具函式 ==========
 
 async function fetchEvents(calendar, calId, timeMin, timeMax) {
   const res = await calendar.events.list({
@@ -310,52 +384,13 @@ async function fetchEvents(calendar, calId, timeMin, timeMax) {
 
 async function checkConflicts(calendar, calId, startDateTime, endDateTime) {
   const events = await fetchEvents(calendar, calId, startDateTime, endDateTime);
-  return events.filter((e) => !e.allDay); // 全天事件不算衝突
+  return events.filter((e) => !e.allDay);
 }
 
 function ensureTimezone(timeStr) {
   if (!timeStr) return timeStr;
-  // 如果已有時區資訊（+08:00 或 Z），直接返回
   if (/[Z+-]\d{2}:\d{2}$/.test(timeStr) || timeStr.endsWith("Z")) return timeStr;
-  // 否則加上台灣時區
   return timeStr + "+08:00";
 }
 
-/**
- * 取得原始事件陣列（供 eventReminderService 等內部服務使用）
- * 查詢主行事曆 + 所有 family calendars
- */
-async function getRawEvents(startDate, endDate) {
-  if (!isAvailable()) return [];
-
-  const calendar = getCalendarClient();
-  const today = new Date().toISOString().slice(0, 10);
-  const start = startDate || today;
-  const end = endDate || start;
-
-  const timeMin = new Date(`${start}T00:00:00+08:00`).toISOString();
-  const timeMax = new Date(`${end}T23:59:59+08:00`).toISOString();
-
-  try {
-    // 主行事曆
-    const events = await fetchEvents(calendar, config.calendar.calendarId, timeMin, timeMax);
-
-    // 家庭行事曆
-    for (const fc of config.calendar.familyCalendars || []) {
-      try {
-        const fEvents = await fetchEvents(calendar, fc.id, timeMin, timeMax);
-        events.push(...fEvents.map((e) => ({ ...e, calendarLabel: fc.name })));
-      } catch (e) {
-        logger.warn(`[Calendar] getRawEvents: ${fc.name} 查詢失敗: ${e.message}`);
-      }
-    }
-
-    events.sort((a, b) => new Date(a.start) - new Date(b.start));
-    return events;
-  } catch (error) {
-    logger.error(`[Calendar] getRawEvents 失敗: ${error.message}`);
-    return [];
-  }
-}
-
-module.exports = { isAvailable, getEvents, addEvent, updateEvent, deleteEvent, getRawEvents };
+module.exports = { isAvailable, getEvents, addEvent, updateEvent, deleteEvent, getRawEvents, getUserCalendarContext };

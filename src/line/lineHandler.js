@@ -1,7 +1,14 @@
 const { lineClient, getBotUserId } = require("./lineClient");
 const { handleMessage, clearHistory } = require("../ai/claudeAgent");
 const { createWelcomeMessage, createFlightComparisonFlex } = require("./flexMessages");
+const { config } = require("../config");
+const userService = require("../services/userService");
+const { generateAdminToken } = require("../auth/adminAuth");
+const { isDbAvailable } = require("../db/prisma");
 const logger = require("../utils/logger");
+
+// 邀請碼格式：6-20 字元英數字
+const INVITATION_CODE_REGEX = /^[A-Z0-9]{6,20}$/i;
 
 async function handleWebhookEvents(events) {
   await Promise.allSettled(events.map((e) => handleSingleEvent(e)));
@@ -89,6 +96,20 @@ async function handleSingleEvent(event) {
     logger.info(`[LINE] 群組訊息: chatId=${chatId.slice(-6)} @mentioned text="${text}"`);
   }
 
+  // === 用戶自動註冊（多租戶模式）===
+  const lineUserId = event.source.userId;
+  if (isDbAvailable() && lineUserId && !isGroup) {
+    try {
+      let profile = {};
+      try {
+        profile = await lineClient.getProfile(lineUserId);
+      } catch {}
+      await userService.findOrCreateUser(lineUserId, profile);
+    } catch (e) {
+      logger.warn(`[LINE] 用戶註冊失敗: ${e.message}`);
+    }
+  }
+
   // === 特殊指令 ===
   if (["清除", "重新開始", "reset"].includes(text)) {
     clearHistory(chatId);
@@ -111,6 +132,75 @@ async function handleSingleEvent(event) {
       replyToken: event.replyToken,
       messages: [{ type: "text", text: idText }],
     });
+  }
+
+  // === 後台管理連結 ===
+  if (!isGroup && ["後台", "管理", "admin", "設定"].includes(text.toLowerCase())) {
+    if (isDbAvailable() && lineUserId) {
+      const activated = await userService.isActivated(lineUserId);
+      if (activated) {
+        const token = generateAdminToken(lineUserId);
+        const adminUrl = `${config.app.url}/admin?token=${token}`;
+        return lineClient.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: "text", text: `你的後台管理連結（24小時有效）：\n\n${adminUrl}` }],
+        });
+      }
+    }
+    // Fallback: 舊模式
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: `後台管理：\n${config.app.url}/admin` }],
+    });
+  }
+
+  // === 邀請碼啟用 ===
+  if (!isGroup && isDbAvailable() && lineUserId && INVITATION_CODE_REGEX.test(text)) {
+    const user = await userService.getUserByLineId(lineUserId);
+    if (user && user.status === "PENDING") {
+      const result = await userService.activateUser(lineUserId, text);
+      return lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: "text", text: result.message }],
+      });
+    }
+  }
+
+  // === 綁定行事曆 ===
+  if (!isGroup && ["綁定行事曆", "連結行事曆", "link calendar"].includes(text.toLowerCase())) {
+    try {
+      const { isAvailable, generateAuthUrl } = require("../auth/googleOAuth");
+      if (isAvailable() && lineUserId) {
+        const authUrl = generateAuthUrl(lineUserId);
+        return lineClient.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: "text", text: `請點擊以下連結來綁定你的 Google 行事曆：\n\n${authUrl}` }],
+        });
+      }
+    } catch (e) {
+      logger.warn(`[LINE] OAuth URL 產生失敗: ${e.message}`);
+    }
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: "行事曆綁定功能尚未啟用，請聯繫管理員。" }],
+    });
+  }
+
+  // === 功能閘門：未啟用用戶提示 ===
+  if (!isGroup && isDbAvailable() && lineUserId) {
+    const activated = await userService.isActivated(lineUserId);
+    if (!activated) {
+      // 未啟用用戶只能基本對話，工具功能受限
+      // 先檢查是否觸發了需要工具的功能
+      const toolKeywords = ["天氣", "新聞", "行事曆", "行程", "機票", "航班", "薪水", "保母", "路況", "晨報"];
+      const needsTool = toolKeywords.some((k) => text.includes(k));
+      if (needsTool) {
+        return lineClient.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: "text", text: "你需要輸入邀請碼來啟用完整功能。\n\n請輸入你的邀請碼（例如：FAMILY2026）" }],
+        });
+      }
+    }
   }
 
   // === 顯示 loading ===

@@ -86,6 +86,22 @@ const config = {
     weekdayOnly: process.env.COMMUTE_WEEKDAY_ONLY !== "false", // 預設只有平日
     routes: parseCommuteRoutes(process.env.COMMUTE_ROUTES),
   },
+  // ===== 多租戶 SaaS =====
+  // Google OAuth 2.0（用戶綁定行事曆用）
+  googleOAuth: {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+  },
+  // 應用程式
+  app: {
+    url: process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`,
+    sessionSecret: process.env.SESSION_SECRET || "default-secret-change-me",
+    ownerLineUserId: process.env.OWNER_LINE_USER_ID,
+  },
+  // 資料庫
+  database: {
+    url: process.env.DATABASE_URL,
+  },
 };
 
 /**
