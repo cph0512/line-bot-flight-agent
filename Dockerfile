@@ -39,6 +39,9 @@ RUN npx playwright install --with-deps chromium
 # 複製程式碼
 COPY . .
 
+# 產生 Prisma client
+RUN npx prisma generate || true
+
 # 建立截圖目錄
 RUN mkdir -p screenshots
 
