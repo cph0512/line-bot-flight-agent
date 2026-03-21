@@ -178,8 +178,8 @@ async function fetchGoogleNews(cat, num, catName, isWorld = false) {
     // 國際新聞（英文 US 版）
     const topicId = GOOGLE_NEWS_TOPICS_WORLD[cat];
     url = topicId
-      ? `https://news.google.com/rss/topics/${topicId}?hl=en&gl=US&ceid=US:en`
-      : `https://news.google.com/rss?hl=en&gl=US&ceid=US:en`;
+      ? `https://news.google.com/rss/topics/${topicId}?hl=en-US&gl=US&ceid=US:en`
+      : `https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en`;
   } else {
     // 台灣新聞
     const topicId = GOOGLE_NEWS_TOPICS_TW[cat];
@@ -196,6 +196,7 @@ async function fetchGoogleNews(cat, num, catName, isWorld = false) {
       "User-Agent": "Mozilla/5.0 (compatible; LineBot/1.0)",
       "Accept": "application/rss+xml, application/xml, text/xml",
     },
+    redirect: "follow",
     signal: AbortSignal.timeout(8000),
   });
 
