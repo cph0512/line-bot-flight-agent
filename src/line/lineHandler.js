@@ -254,7 +254,7 @@ async function handleSingleEvent(event) {
         user: chatId.substring(0, 8) + "...",
       }, {
         headers: { "X-Forward-Key": process.env.TELEGRAM_FORWARD_KEY },
-        timeout: 120000, // 2 minutes for Claude
+        timeout: 180000, // 3 minutes for Claude
       });
 
       const claudeReply = tgRes.data?.reply || "Claude 沒有回覆";
