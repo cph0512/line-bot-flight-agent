@@ -6,6 +6,7 @@ const userService = require("../services/userService");
 const { generateAdminToken } = require("../auth/adminAuth");
 const { isDbAvailable } = require("../db/prisma");
 const logger = require("../utils/logger");
+const axios = require("axios");
 
 // 邀請碼格式：6-20 字元英數字
 const INVITATION_CODE_REGEX = /^[A-Z0-9]{6,20}$/i;
@@ -270,6 +271,8 @@ async function handleSingleEvent(event) {
   try {
     await lineClient.replyMessage({ replyToken: event.replyToken, messages });
     logger.info(`[LINE] 回覆成功: ${messages.length} 則訊息`);
+    // 轉發到 Telegram（靜默，不等待）
+    forwardToTelegram(text, responseText, { chatId }).catch(() => {});
   } catch (replyErr) {
     logger.error("[LINE] replyMessage 失敗（replyToken 可能已過期）", {
       error: replyErr.message,
@@ -284,6 +287,26 @@ async function handleSingleEvent(event) {
     } catch (pushErr) {
       logger.error("[LINE] pushMessage 也失敗", { error: pushErr.message });
     }
+  }
+}
+
+// === Telegram 轉發 ===
+async function forwardToTelegram(userText, botReply, meta = {}) {
+  const url = process.env.TELEGRAM_FORWARD_URL;
+  const key = process.env.TELEGRAM_FORWARD_KEY;
+  if (!url || !key) return;
+
+  try {
+    await axios.post(url, {
+      source: "flight-agent",
+      message: `📩 ${userText}\n💬 ${botReply.substring(0, 500)}`,
+      user: meta.chatId ? meta.chatId.substring(0, 8) + "..." : undefined,
+    }, {
+      headers: { "X-Forward-Key": key },
+      timeout: 5000,
+    });
+  } catch (e) {
+    logger.warn(`[TG Forward] ${e.message}`);
   }
 }
 
