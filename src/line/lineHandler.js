@@ -228,64 +228,108 @@ async function handleSingleEvent(event) {
   logger.info(`[LINE] 開始處理訊息: chatId=${chatId.slice(-6)} isGroup=${isGroup} text="${text}"`);
 
   // === AI 處理 ===
-  let aiResponse;
-  try {
-    aiResponse = await handleMessage(chatId, text);
-  } catch (error) {
-    logger.error("[LINE] AI 處理完全失敗", { error: error.message, stack: error.stack });
-    aiResponse = { text: `系統錯誤：${error.message}\n\n請稍後再試，或直接到航空公司官網查詢。` };
-  }
+  const useClaudeTG = process.env.AI_ENGINE === 'claude-tg' && process.env.TELEGRAM_FORWARD_URL;
 
-  // === 組合回覆訊息（LINE 每次最多 5 則）===
-  const messages = [];
-
-  // 如果有航班資料，先送 Flex 比價卡片（去程 + 回程）
-  if (aiResponse.flights && aiResponse.flights.length > 0) {
+  if (useClaudeTG) {
+    // ---- Claude via tg-service 模式 ----
+    // 先回覆「思考中」，因為 Claude 可能需要較長時間
     try {
-      const inbound = aiResponse.inboundFlights || [];
-      const flexMsg = createFlightComparisonFlex(aiResponse.flights, inbound);
-      if (flexMsg) {
-        messages.push(flexMsg);
-        logger.info(`[LINE] 已建立 Flex Message: 去程=${aiResponse.flights.length} 回程=${inbound.length}`);
-      }
-    } catch (flexErr) {
-      logger.error("[LINE] Flex Message 建立失敗", { error: flexErr.message });
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: "text", text: "⏳ Claude 思考中..." }],
+      });
+    } catch (e) {
+      logger.warn("[LINE] replyToken 可能已過期", { error: e.message });
     }
-  }
 
-  // 再送 AI 文字分析
-  const maxTextMessages = messages.length > 0 ? 4 : 5;
-  const responseText = typeof aiResponse === "string"
-    ? aiResponse
-    : (aiResponse.text || "查詢完成");
-  const textParts = splitMessage(responseText);
-  textParts.slice(0, maxTextMessages).forEach((t) => {
-    messages.push({ type: "text", text: t });
-  });
-
-  // 確保至少有一則訊息
-  if (messages.length === 0) {
-    messages.push({ type: "text", text: "查詢完成，但沒有找到結果。" });
-  }
-
-  try {
-    await lineClient.replyMessage({ replyToken: event.replyToken, messages });
-    logger.info(`[LINE] 回覆成功: ${messages.length} 則訊息`);
-    // 轉發到 Telegram（靜默，不等待）
-    forwardToTelegram(text, responseText, { chatId }).catch(() => {});
-  } catch (replyErr) {
-    logger.error("[LINE] replyMessage 失敗（replyToken 可能已過期）", {
-      error: replyErr.message,
-    });
-    // replyToken 過期的話可以試用 push message
     try {
+      logger.info(`[LINE] Claude-TG mode: sending to tg-service`);
+      const tgRes = await axios.post(process.env.TELEGRAM_FORWARD_URL, {
+        source: "flight-agent",
+        message: text,
+        needReply: true,
+        sourceId: chatId,
+        sourceType: "line",
+        botName: "flight-agent",
+        user: chatId.substring(0, 8) + "...",
+      }, {
+        headers: { "X-Forward-Key": process.env.TELEGRAM_FORWARD_KEY },
+        timeout: 120000, // 2 minutes for Claude
+      });
+
+      const claudeReply = tgRes.data?.reply || "Claude 沒有回覆";
+      const replyParts = splitMessage(claudeReply);
+      const replyMessages = replyParts.slice(0, 5).map(t => ({ type: "text", text: t }));
+
+      await lineClient.pushMessage({ to: chatId, messages: replyMessages });
+      logger.info(`[LINE] Claude-TG 回覆成功: ${replyMessages.length} 則`);
+    } catch (error) {
+      logger.error("[LINE] Claude-TG 失敗", { error: error.message });
       await lineClient.pushMessage({
         to: chatId,
-        messages: messages.slice(0, 5),
+        messages: [{ type: "text", text: `Claude 處理失敗：${error.message}\n\n可改回 Gemini 模式。` }],
+      }).catch(() => {});
+    }
+  } else {
+    // ---- 原本 Gemini 模式 ----
+    let aiResponse;
+    try {
+      aiResponse = await handleMessage(chatId, text);
+    } catch (error) {
+      logger.error("[LINE] AI 處理完全失敗", { error: error.message, stack: error.stack });
+      aiResponse = { text: `系統錯誤：${error.message}\n\n請稍後再試，或直接到航空公司官網查詢。` };
+    }
+
+    // === 組合回覆訊息（LINE 每次最多 5 則）===
+    const messages = [];
+
+    // 如果有航班資料，先送 Flex 比價卡片（去程 + 回程）
+    if (aiResponse.flights && aiResponse.flights.length > 0) {
+      try {
+        const inbound = aiResponse.inboundFlights || [];
+        const flexMsg = createFlightComparisonFlex(aiResponse.flights, inbound);
+        if (flexMsg) {
+          messages.push(flexMsg);
+          logger.info(`[LINE] 已建立 Flex Message: 去程=${aiResponse.flights.length} 回程=${inbound.length}`);
+        }
+      } catch (flexErr) {
+        logger.error("[LINE] Flex Message 建立失敗", { error: flexErr.message });
+      }
+    }
+
+    // 再送 AI 文字分析
+    const maxTextMessages = messages.length > 0 ? 4 : 5;
+    const responseText = typeof aiResponse === "string"
+      ? aiResponse
+      : (aiResponse.text || "查詢完成");
+    const textParts = splitMessage(responseText);
+    textParts.slice(0, maxTextMessages).forEach((t) => {
+      messages.push({ type: "text", text: t });
+    });
+
+    // 確保至少有一則訊息
+    if (messages.length === 0) {
+      messages.push({ type: "text", text: "查詢完成，但沒有找到結果。" });
+    }
+
+    try {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages });
+      logger.info(`[LINE] 回覆成功: ${messages.length} 則訊息`);
+      // 轉發到 Telegram（靜默，不等待）
+      forwardToTelegram(text, responseText, { chatId }).catch(() => {});
+    } catch (replyErr) {
+      logger.error("[LINE] replyMessage 失敗（replyToken 可能已過期）", {
+        error: replyErr.message,
       });
-      logger.info("[LINE] 改用 pushMessage 成功");
-    } catch (pushErr) {
-      logger.error("[LINE] pushMessage 也失敗", { error: pushErr.message });
+      try {
+        await lineClient.pushMessage({
+          to: chatId,
+          messages: messages.slice(0, 5),
+        });
+        logger.info("[LINE] 改用 pushMessage 成功");
+      } catch (pushErr) {
+        logger.error("[LINE] pushMessage 也失敗", { error: pushErr.message });
+      }
     }
   }
 }
