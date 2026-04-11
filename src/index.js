@@ -13,6 +13,7 @@ const { weatherService, newsService, calendarService, briefingService, googleFli
 const logger = require("./utils/logger");
 const { prisma, isDbAvailable, testConnection, disconnect } = require("./db/prisma");
 const googleOAuth = require("./auth/googleOAuth");
+const { adminAuthMiddleware } = require("./auth/adminAuth");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
 process.on("uncaughtException", (err) => {
@@ -54,8 +55,8 @@ app.get("/", (req, res) => {
   });
 });
 
-// 完整診斷端點 - 一次檢查所有組件
-app.get("/health", async (req, res) => {
+// 完整診斷端點 - 一次檢查所有組件（需認證）
+app.get("/health", adminAuthMiddleware, async (req, res) => {
   const report = {
     timestamp: new Date().toISOString(),
     server: "ok",
@@ -152,13 +153,11 @@ app.get("/health", async (req, res) => {
   res.status(allOk ? 200 : 500).json(report);
 });
 
-// ========== 行事曆診斷 ==========
-app.get("/debug/calendar", async (req, res) => {
+// ========== 行事曆診斷（需認證）==========
+app.get("/debug/calendar", adminAuthMiddleware, async (req, res) => {
   const info = {
-    GOOGLE_SERVICE_ACCOUNT_KEY: process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-      ? `set (${process.env.GOOGLE_SERVICE_ACCOUNT_KEY.length} chars, starts: ${process.env.GOOGLE_SERVICE_ACCOUNT_KEY.slice(0, 20)}...)`
-      : "NOT SET",
-    GOOGLE_CALENDAR_ID: process.env.GOOGLE_CALENDAR_ID || "NOT SET",
+    GOOGLE_SERVICE_ACCOUNT_KEY: process.env.GOOGLE_SERVICE_ACCOUNT_KEY ? "set" : "NOT SET",
+    GOOGLE_CALENDAR_ID: process.env.GOOGLE_CALENDAR_ID ? "set" : "NOT SET",
     isAvailable: calendarService.isAvailable(),
   };
 
@@ -174,8 +173,8 @@ app.get("/debug/calendar", async (req, res) => {
         info.fixedNewlines = true;
       }
       info.jsonParse = "OK";
-      info.client_email = parsed.client_email || "missing";
-      info.project_id = parsed.project_id || "missing";
+      info.hasClientEmail = !!parsed.client_email;
+      info.hasProjectId = !!parsed.project_id;
     } catch (e) {
       info.jsonParse = `FAIL: ${e.message}`;
     }
@@ -195,8 +194,8 @@ app.get("/debug/calendar", async (req, res) => {
   res.json(info);
 });
 
-// ========== 搜尋測試端點 ==========
-app.get("/debug/search", async (req, res) => {
+// ========== 搜尋測試端點（需認證）==========
+app.get("/debug/search", adminAuthMiddleware, async (req, res) => {
   const query = req.query.q || "台積電股價";
   const { webSearchService } = require("./services");
   try {
@@ -207,8 +206,8 @@ app.get("/debug/search", async (req, res) => {
   }
 });
 
-// ========== Google Flights 測試端點 ==========
-app.get("/debug/flights", async (req, res) => {
+// ========== Google Flights 測試端點（需認證）==========
+app.get("/debug/flights", adminAuthMiddleware, async (req, res) => {
   if (!googleFlightsService.isAvailable()) {
     return res.json({ success: false, error: "RAPIDAPI_KEY 未設定" });
   }
@@ -234,8 +233,8 @@ app.get("/debug/flights", async (req, res) => {
   }
 });
 
-// ========== 通勤路況測試端點 ==========
-app.get("/debug/commute", async (req, res) => {
+// ========== 通勤路況測試端點（需認證）==========
+app.get("/debug/commute", adminAuthMiddleware, async (req, res) => {
   if (!commuteService.isAvailable()) {
     return res.json({ success: false, error: "未設定 GOOGLE_MAPS_API_KEY 或 COMMUTE_ROUTES", config: { hasApiKey: !!config.commute?.googleMapsApiKey, routes: config.commute?.routes?.length || 0 } });
   }
@@ -247,8 +246,8 @@ app.get("/debug/commute", async (req, res) => {
   }
 });
 
-// ========== 行事曆提醒測試端點 ==========
-app.get("/debug/reminder", async (req, res) => {
+// ========== 行事曆提醒測試端點（需認證）==========
+app.get("/debug/reminder", adminAuthMiddleware, async (req, res) => {
   if (!eventReminderService.isAvailable()) {
     return res.json({ success: false, error: "行事曆未設定" });
   }
@@ -260,8 +259,8 @@ app.get("/debug/reminder", async (req, res) => {
   }
 });
 
-// ========== 保母薪資測試端點 ==========
-app.get("/debug/nanny", async (req, res) => {
+// ========== 保母薪資測試端點（需認證）==========
+app.get("/debug/nanny", adminAuthMiddleware, async (req, res) => {
   if (!nannyService.isAvailable()) {
     return res.json({ success: false, error: "保母設定檔不存在" });
   }
