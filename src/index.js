@@ -14,6 +14,7 @@ const logger = require("./utils/logger");
 const { prisma, isDbAvailable, testConnection, disconnect } = require("./db/prisma");
 const googleOAuth = require("./auth/googleOAuth");
 const { adminAuthMiddleware } = require("./auth/adminAuth");
+const { consumeNonce } = require("./auth/oauthNonce");
 
 // ========== 全域錯誤處理（防止 server 無聲崩潰）==========
 process.on("uncaughtException", (err) => {
@@ -294,20 +295,19 @@ app.post("/webhook", lineMiddleware, async (req, res) => {
 
 // ========== Google OAuth 2.0 行事曆綁定 ==========
 app.get("/auth/google/start", (req, res) => {
-  const token = req.query.token;
-  if (!token) return res.status(400).send("缺少 token 參數");
+  const nonce = req.query.nonce;
+  if (!nonce) return res.status(400).send("缺少認證參數");
 
   if (!googleOAuth.isAvailable()) {
     return res.status(503).send("Google OAuth 未設定，請聯繫管理員");
   }
 
-  // 驗證 JWT 取得 lineUserId
-  const { verifyAdminToken } = require("./auth/adminAuth");
-  const payload = verifyAdminToken(token);
-  if (!payload) return res.status(401).send("Token 無效或已過期，請重新從 LINE 取得連結");
+  // 驗證並消費一次性 nonce 取得 lineUserId
+  const lineUserId = consumeNonce(nonce);
+  if (!lineUserId) return res.status(401).send("連結無效或已過期，請重新從 LINE 取得連結");
 
   try {
-    const url = googleOAuth.generateAuthUrl(payload.lineUserId);
+    const url = googleOAuth.generateAuthUrl(lineUserId);
 
     // 偵測 LINE 內建瀏覽器（WebView）— Google 封鎖 WebView OAuth
     const ua = req.headers["user-agent"] || "";
