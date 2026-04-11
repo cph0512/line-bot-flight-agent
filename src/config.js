@@ -95,7 +95,7 @@ const config = {
   // 應用程式
   app: {
     url: process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`,
-    sessionSecret: process.env.SESSION_SECRET || "default-secret-change-me",
+    sessionSecret: process.env.SESSION_SECRET,
     ownerLineUserId: process.env.OWNER_LINE_USER_ID,
   },
   // 資料庫
@@ -159,7 +159,18 @@ function validateConfig() {
     ["LINE_CHANNEL_ACCESS_TOKEN", config.line.channelAccessToken],
     ["LINE_CHANNEL_SECRET", config.line.channelSecret],
     ["GEMINI_API_KEY 或 ANTHROPIC_API_KEY", hasAiKey ? "ok" : null],
+    ["SESSION_SECRET", config.app.sessionSecret],
   ];
+
+  // SESSION_SECRET 不能使用已知弱值
+  const weakSecrets = ["default-secret-change-me", "secret", "changeme", "password"];
+  if (config.app.sessionSecret && weakSecrets.includes(config.app.sessionSecret.toLowerCase())) {
+    console.error("=".repeat(50));
+    console.error("  SESSION_SECRET 使用了不安全的已知預設值！");
+    console.error("  請設定一個強隨機密鑰（至少 32 字元）");
+    console.error("=".repeat(50));
+    process.exit(1);
+  }
 
   const missing = required.filter(([, v]) => !v || isPlaceholder(v));
   if (missing.length > 0) {
