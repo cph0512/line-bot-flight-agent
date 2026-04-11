@@ -26,20 +26,16 @@ function verifyAdminToken(token) {
 
 /**
  * Express middleware：驗證 JWT + 載入用戶
- * 支援兩種傳入方式：
- * 1. Authorization: Bearer <token>
- * 2. ?token=<token> (URL query)
+ * 僅接受 Authorization: Bearer <token> header
  *
  * 同時向下相容舊的 ADMIN_TOKEN（全域密碼）
  */
 async function adminAuthMiddleware(req, res, next) {
-  // 取得 token
+  // 取得 token（僅從 Authorization header）
   let token = null;
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith("Bearer ")) {
     token = authHeader.slice(7);
-  } else if (req.query?.token) {
-    token = req.query.token;
   }
 
   if (!token) {
